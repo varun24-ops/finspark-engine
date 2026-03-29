@@ -1,12 +1,14 @@
 tenant_id: {{ tenant_id }}
-version: "1.0.0"
+version: "{{ config_version }}"
 environment: sandbox
 generated_at: {{ generated_at }}
 integrations:
 {% for svc in services %}
   {{ svc.id }}:
+    service_type: {{ svc.type }}
     adapter: {{ svc.adapter }}@{{ svc.version }}
     provider: {{ svc.provider }}
+    backup_provider: {{ svc.backup_provider or "null" }}
     mandatory: {{ svc.mandatory | lower }}
     auth: {{ svc.vault_key }}
     timeout_ms: {{ svc.timeout }}

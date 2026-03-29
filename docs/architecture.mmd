@@ -1,0 +1,17 @@
+flowchart TD
+    A[BRD or SOW text] --> B[parser.py]
+    B --> C[mapper.py]
+    C --> D[config_gen.py]
+    D --> E[simulator.py]
+    E --> F{Failures found?}
+    F -- Yes --> G[healer.py]
+    G --> E
+    F -- No --> H[audit.py]
+    D --> I[diff.py]
+    J[registry.py SQLite] --> D
+    J --> G
+    K[tenants.py workspace isolation] --> D
+    K --> H
+    L[app.py Streamlit UI] --> B
+    L --> J
+    L --> H

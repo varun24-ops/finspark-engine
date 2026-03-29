@@ -1,90 +1,113 @@
-import os
-from datetime import datetime
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
 from jinja2 import Environment, FileSystemLoader
+
+from diff import diff_configs, summarize_diff
 from parser import ParsedBRD
+from registry import get_adapter, init_registry
+from tenants import ensure_tenant_workspace
 
-ADAPTER_REGISTRY = {
-    # Credit Bureaus
-    "CIBIL": {
-        "adapter": "cibil-bureau-adapter",
-        "version": "v3.1",
-        "defaults": {"timeout": 3000}
-    },
-    "Experian": {
-        "adapter": "experian-bureau-adapter",
-        "version": "v2.9",
-        "defaults": {"timeout": 3200}
-    },
+TEMPLATE_NAME = "integration_config.yaml.j2"
 
-    # KYC
-    "UIDAI": {
-        "adapter": "uidai-ekyc-adapter",
-        "version": "v2.4",
-        "defaults": {"timeout": 2000}
-    },
 
-    # GST Verification
-    "NIC": {
-        "adapter": "nic-gst-adapter",
-        "version": "v1.8",
-        "defaults": {"timeout": 2500}
-    },
-    "GSTN": {
-        "adapter": "gstn-verification-adapter",
-        "version": "v1.2",
-        "defaults": {"timeout": 2600}
-    },
-
-    # Bank / Payment Validation
-    "Razorpay": {
-        "adapter": "razorpay-penny-drop-adapter",
-        "version": "v4.0",
-        "defaults": {"timeout": 1500}
-    },
-    "PayU": {
-        "adapter": "payu-payment-gateway-adapter",
-        "version": "v5.3",
-        "defaults": {"timeout": 1800}
-    },
-}
+@dataclass
+class GeneratedConfig:
+    tenant_id: str
+    config_path: Path
+    current_path: Path
+    rendered_yaml: str
+    version_label: str
+    previous_path: Path | None = None
+    diff_payload: dict | None = None
+    diff_summary: str = "First config version generated for this tenant."
 
 def fallback_rule(mandatory: bool) -> str:
     return "fail_closed" if mandatory else "skip"
 
-def generate_config(parsed: ParsedBRD) -> str:
+
+def _build_enriched_services(parsed: ParsedBRD) -> list[dict[str, str | int | bool | None]]:
     enriched_services = []
     for svc in parsed.services:
-        registry = ADAPTER_REGISTRY.get(svc.provider)
-        if not registry:
+        registry_entry = get_adapter(svc.provider)
+        if not registry_entry:
             raise ValueError(f"No adapter registry entry for provider: {svc.provider}")
-        enriched_services.append({
-            "id": svc.id,
-            "name": svc.name,
-            "provider": svc.provider,
-            "mandatory": svc.mandatory,
-            "adapter": registry["adapter"],
-            "version": registry["version"],
-            "timeout": registry["defaults"]["timeout"],
-            "fallback": fallback_rule(svc.mandatory),
-            "vault_key": f"vault://{parsed.tenant_id}/{svc.id}/api_key"
-        })
 
-    env = Environment(loader=FileSystemLoader("templates"))
-    template = env.get_template("integration_config.yaml.j2")
+        enriched_services.append(
+            {
+                "id": svc.id,
+                "name": svc.name,
+                "type": svc.type,
+                "provider": registry_entry["provider"],
+                "mandatory": svc.mandatory,
+                "adapter": registry_entry["adapter"],
+                "version": registry_entry["version"],
+                "timeout": registry_entry["timeout_ms"],
+                "fallback": fallback_rule(svc.mandatory),
+                "backup_provider": registry_entry.get("backup_provider"),
+                "vault_key": f"vault://{parsed.tenant_id}/{svc.id}/api_key",
+            }
+        )
+    return enriched_services
+
+
+def generate_config(parsed: ParsedBRD) -> GeneratedConfig:
+    init_registry()
+    workspace = ensure_tenant_workspace(parsed.tenant_id)
+    configs_dir = workspace["configs_dir"]
+    current_path = workspace["current_config"]
+    assert isinstance(configs_dir, Path)
+    assert isinstance(current_path, Path)
+
+    previous_payload = (
+        yaml.safe_load(current_path.read_text(encoding="utf-8"))
+        if current_path.exists()
+        else None
+    )
+    previous_versions = sorted(configs_dir.glob("*_adapters.yaml"))
+    previous_path = previous_versions[-1] if previous_versions else None
+    enriched_services = _build_enriched_services(parsed)
+
+    templates_dir = Path(__file__).resolve().parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(templates_dir)))
+    template = env.get_template(TEMPLATE_NAME)
+    version_label = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     rendered_yaml = template.render(
         tenant_id=parsed.tenant_id,
+        config_version=version_label,
         services=enriched_services,
-        generated_at=datetime.utcnow().isoformat()
+        generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
-    os.makedirs("configs", exist_ok=True)
-    output_path = f"configs/{parsed.tenant_id}_adapters.yaml"
-    with open(output_path, "w") as f:
-        f.write(rendered_yaml)
-    return output_path
+    versioned_path = configs_dir / f"{version_label}_adapters.yaml"
+    versioned_path.write_text(rendered_yaml, encoding="utf-8")
+    current_path.write_text(rendered_yaml, encoding="utf-8")
+
+    diff_payload = None
+    diff_summary = "First config version generated for this tenant."
+    if previous_payload:
+        new_payload = yaml.safe_load(rendered_yaml) or {}
+        diff_payload = diff_configs(previous_payload, new_payload)
+        diff_summary = summarize_diff(diff_payload)
+
+    return GeneratedConfig(
+        tenant_id=parsed.tenant_id,
+        config_path=versioned_path,
+        current_path=current_path,
+        rendered_yaml=rendered_yaml,
+        version_label=version_label,
+        previous_path=previous_path,
+        diff_payload=diff_payload,
+        diff_summary=diff_summary,
+    )
 
 if __name__ == "__main__":
     from parser import parse_brd
+
     sample_brd = """
     Acme Lending requires CIBIL for credit checks (mandatory).
     UIDAI eKYC is mandatory for all borrowers.
@@ -92,5 +115,5 @@ if __name__ == "__main__":
     Razorpay penny drop is mandatory for bank validation.
     """
     parsed = parse_brd(sample_brd)
-    path = generate_config(parsed)
-    print(f"Config generated at: {path}")
+    generated = generate_config(parsed)
+    print(f"Config generated at: {generated.config_path}")
