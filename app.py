@@ -43,7 +43,7 @@ with st.sidebar:
             f"Logged in as {st.session_state.tenant_display_name} "
             f"({st.session_state.tenant_id})"
         )
-        if st.button("Log out", use_container_width=True):
+        if st.button("Log out", width="stretch"):
             st.session_state.tenant_id = None
             st.session_state.tenant_display_name = None
             st.rerun()
@@ -56,7 +56,7 @@ with st.sidebar:
                     format_func=_tenant_label,
                 )
                 login_code = st.text_input("Access code", type="password")
-                login_submit = st.form_submit_button("Log in", use_container_width=True)
+                login_submit = st.form_submit_button("Log in", width="stretch")
 
             if login_submit:
                 if authenticate_tenant(selected_tenant["tenant_id"], login_code):
@@ -68,7 +68,7 @@ with st.sidebar:
         with st.form("create_tenant_form"):
             tenant_name = st.text_input("Create tenant")
             tenant_code = st.text_input("Set access code", type="password")
-            create_submit = st.form_submit_button("Create tenant", use_container_width=True)
+            create_submit = st.form_submit_button("Create tenant", width="stretch")
 
         if create_submit:
             try:
@@ -96,7 +96,7 @@ with st.sidebar:
     st.divider()
     st.caption("Adapter registry")
     registry_rows = list_adapters(include_inactive=True)
-    st.dataframe(registry_rows, use_container_width=True, hide_index=True)
+    st.dataframe(registry_rows, width="stretch", hide_index=True)
 
     with st.expander("Manage registry"):
         with st.form("upsert_registry_form"):
@@ -118,7 +118,7 @@ with st.sidebar:
             timeout_ms = st.number_input("Timeout (ms)", min_value=100, value=2000, step=100)
             backup_provider = st.text_input("Backup provider")
             notes = st.text_area("Notes")
-            save_registry = st.form_submit_button("Save adapter", use_container_width=True)
+            save_registry = st.form_submit_button("Save adapter", width="stretch")
 
         if save_registry:
             upsert_adapter(
@@ -139,7 +139,7 @@ with st.sidebar:
                 "Disable provider",
                 options=active_providers,
             )
-            if st.button("Disable adapter", use_container_width=True):
+            if st.button("Disable adapter", width="stretch"):
                 delete_adapter(provider_to_disable)
                 st.warning(f"{provider_to_disable} marked inactive.")
                 st.rerun()
@@ -156,7 +156,7 @@ brd_input = st.text_area(
     placeholder="Paste your BRD or SOW text here...",
 )
 
-run_btn = st.button("Run pipeline", type="primary", use_container_width=True)
+run_btn = st.button("Run pipeline", type="primary", width="stretch")
 
 if run_btn:
     if not brd_input.strip():
@@ -317,7 +317,7 @@ if run_btn:
     recent_entries = load_audit_entries(parsed.tenant_id, limit=5)
     if recent_entries:
         st.caption("Recent runs for this tenant")
-        st.dataframe(recent_entries, use_container_width=True)
+        st.dataframe(recent_entries, width="stretch")
 
     st.divider()
     if summary["failed"] == 0:
