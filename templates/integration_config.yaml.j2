@@ -1,0 +1,14 @@
+tenant_id: {{ tenant_id }}
+version: "1.0.0"
+environment: sandbox
+generated_at: {{ generated_at }}
+integrations:
+{% for svc in services %}
+  {{ svc.id }}:
+    adapter: {{ svc.adapter }}@{{ svc.version }}
+    provider: {{ svc.provider }}
+    mandatory: {{ svc.mandatory | lower }}
+    auth: {{ svc.vault_key }}
+    timeout_ms: {{ svc.timeout }}
+    fallback: {{ svc.fallback }}
+{% endfor %}

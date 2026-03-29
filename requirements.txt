@@ -1,0 +1,9 @@
+streamlit
+jinja2
+numpy
+scikit-learn
+pydantic
+python-dotenv
+groq
+sentence-transformers
+pyyaml
