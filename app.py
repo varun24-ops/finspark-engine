@@ -9,7 +9,7 @@ from config_gen import generate_config
 from healer import self_heal_config
 from mapper import enrich_field_name, map_fields
 from parser import ParsedBRD, parse_brd
-from registry import delete_adapter, init_registry, list_adapters, upsert_adapter
+from registry import delete_adapter, get_adapter, init_registry, list_adapters, upsert_adapter
 from simulator import MOCK_RESPONSES, run_simulation, summarize_results
 from tenants import authenticate_tenant, list_tenants, register_tenant
 
@@ -28,6 +28,37 @@ if "tenant_display_name" not in st.session_state:
 
 def _tenant_label(tenant: dict) -> str:
     return f"{tenant['display_name']} ({tenant['tenant_id']})"
+
+
+def _default_timeout(service_type: str) -> int:
+    timeout_defaults = {
+        "credit_bureau": 3000,
+        "kyc": 2000,
+        "gst": 2500,
+        "bank_verify": 1500,
+        "payment": 1800,
+        "fraud": 2200,
+    }
+    return timeout_defaults.get(service_type, 2000)
+
+
+def _default_adapter_name(provider: str, service_type: str) -> str:
+    provider_slug = provider.strip().lower().replace(" ", "-")
+    service_slug = service_type.replace("_", "-")
+    return f"{provider_slug}-{service_slug}-adapter"
+
+
+def _missing_registry_services(parsed: ParsedBRD) -> list:
+    missing = []
+    seen = set()
+    for service in parsed.services:
+        provider_key = service.provider.strip().lower()
+        if provider_key in seen:
+            continue
+        seen.add(provider_key)
+        if get_adapter(service.provider) is None:
+            missing.append(service)
+    return missing
 
 
 st.title("FinSpark - AI Integration Orchestration Engine")
@@ -154,6 +185,7 @@ brd_input = st.text_area(
     value=sample_brd,
     height=160,
     placeholder="Paste your BRD or SOW text here...",
+    key="brd_input",
 )
 
 run_btn = st.button("Run pipeline", type="primary", width="stretch")
@@ -193,6 +225,98 @@ if run_btn:
 
     with st.expander("View raw JSON"):
         st.json(parsed.model_dump())
+
+    missing_registry_services = _missing_registry_services(parsed)
+    if missing_registry_services:
+        st.divider()
+        st.subheader("Resolve Missing Registry Entries")
+        st.warning(
+            "Some providers from this BRD are not in the adapter registry yet. "
+            "Add them below, then click Run pipeline again."
+        )
+
+        for service in missing_registry_services:
+            with st.form(f"missing_registry_{service.provider}_{service.type}"):
+                st.text_input(
+                    "Provider",
+                    value=service.provider,
+                    key=f"missing_provider_{service.provider}_{service.type}",
+                )
+                service_type = st.selectbox(
+                    "Service type",
+                    options=[
+                        "credit_bureau",
+                        "kyc",
+                        "gst",
+                        "bank_verify",
+                        "payment",
+                        "fraud",
+                        "other",
+                    ],
+                    index=[
+                        "credit_bureau",
+                        "kyc",
+                        "gst",
+                        "bank_verify",
+                        "payment",
+                        "fraud",
+                        "other",
+                    ].index(service.type if service.type in {
+                        "credit_bureau",
+                        "kyc",
+                        "gst",
+                        "bank_verify",
+                        "payment",
+                        "fraud",
+                        "other",
+                    } else "other"),
+                    key=f"missing_service_type_{service.provider}_{service.type}",
+                )
+                adapter_name = st.text_input(
+                    "Adapter name",
+                    value=_default_adapter_name(service.provider, service.type),
+                    key=f"missing_adapter_{service.provider}_{service.type}",
+                )
+                version = st.text_input(
+                    "Version",
+                    value="v1.0",
+                    key=f"missing_version_{service.provider}_{service.type}",
+                )
+                timeout_ms = st.number_input(
+                    "Timeout (ms)",
+                    min_value=100,
+                    value=_default_timeout(service.type),
+                    step=100,
+                    key=f"missing_timeout_{service.provider}_{service.type}",
+                )
+                backup_provider = st.text_input(
+                    "Backup provider",
+                    value="",
+                    key=f"missing_backup_{service.provider}_{service.type}",
+                )
+                notes = st.text_area(
+                    "Notes",
+                    value=f"Added dynamically from BRD-detected provider {service.provider}.",
+                    key=f"missing_notes_{service.provider}_{service.type}",
+                )
+                add_missing_registry = st.form_submit_button(
+                    f"Add {service.provider} to registry",
+                    width="stretch",
+                )
+
+            if add_missing_registry:
+                upsert_adapter(
+                    provider=service.provider,
+                    service_type=service_type,
+                    adapter=adapter_name,
+                    version=version,
+                    timeout_ms=int(timeout_ms),
+                    backup_provider=backup_provider or None,
+                    notes=notes,
+                )
+                st.rerun()
+
+        st.stop()
 
     st.divider()
     st.subheader("Step 3 - Field mappings (reference CIBIL adapter)")

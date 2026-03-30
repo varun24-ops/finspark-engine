@@ -115,6 +115,113 @@ MOCK_RESPONSES = {
     },
 }
 
+GENERIC_SERVICE_MOCKS = {
+    "credit_bureau": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-BUREAU-1001",
+            "creditScore": 735,
+            "decision": "CLEAR",
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_BUREAU_500",
+            "message": "Dynamic bureau adapter simulation failed",
+        },
+        "latency_ms": 1600,
+        "required_fields": ["status", "referenceId", "creditScore"],
+    },
+    "kyc": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-KYC-1001",
+            "verified": True,
+            "matchScore": 0.96,
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_KYC_500",
+            "message": "Dynamic KYC adapter simulation failed",
+        },
+        "latency_ms": 900,
+        "required_fields": ["status", "referenceId", "verified"],
+    },
+    "gst": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-GST-1001",
+            "gstStatus": "ACTIVE",
+            "gstin": "29ABCDE1234F1Z5",
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_GST_500",
+            "message": "Dynamic GST adapter simulation failed",
+        },
+        "latency_ms": 780,
+        "required_fields": ["status", "referenceId", "gstStatus"],
+    },
+    "bank_verify": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-BANK-1001",
+            "accountVerified": True,
+            "beneficiaryName": "Demo Beneficiary",
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_BANK_500",
+            "message": "Dynamic bank verification adapter simulation failed",
+        },
+        "latency_ms": 500,
+        "required_fields": ["status", "referenceId", "accountVerified"],
+    },
+    "payment": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-PAY-1001",
+            "paymentStatus": "CAPTURED",
+            "amount": 12500.0,
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_PAY_500",
+            "message": "Dynamic payment adapter simulation failed",
+        },
+        "latency_ms": 950,
+        "required_fields": ["status", "referenceId", "paymentStatus"],
+    },
+    "fraud": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-FRAUD-1001",
+            "riskScore": 0.12,
+            "decision": "APPROVE",
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_FRAUD_500",
+            "message": "Dynamic fraud adapter simulation failed",
+        },
+        "latency_ms": 1100,
+        "required_fields": ["status", "referenceId", "decision"],
+    },
+    "other": {
+        "success": {
+            "status": "SUCCESS",
+            "referenceId": "GEN-OTHER-1001",
+            "adapterStatus": "READY",
+        },
+        "failure": {
+            "status": "FAILURE",
+            "errorCode": "GEN_OTHER_500",
+            "message": "Dynamic adapter simulation failed",
+        },
+        "latency_ms": 1000,
+        "required_fields": ["status", "referenceId", "adapterStatus"],
+    },
+}
+
 
 def _load_config(config_source: str | Path | dict[str, Any]) -> dict[str, Any]:
     if isinstance(config_source, dict):
@@ -133,6 +240,21 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _generic_mock_for(service_type: str, adapter_name: str, provider: str) -> dict[str, Any]:
+    template = GENERIC_SERVICE_MOCKS.get(service_type, GENERIC_SERVICE_MOCKS["other"])
+    mock = {
+        "success": dict(template["success"]),
+        "failure": dict(template["failure"]),
+        "latency_ms": template["latency_ms"],
+        "required_fields": list(template["required_fields"]),
+    }
+    mock["success"]["adapter"] = adapter_name
+    mock["success"]["provider"] = provider
+    mock["failure"]["adapter"] = adapter_name
+    mock["failure"]["provider"] = provider
+    return mock
+
+
 def simulate_one(
     service_id: str,
     provider: str,
@@ -143,24 +265,14 @@ def simulate_one(
     should_fail: bool,
 ) -> dict[str, Any]:
     issues = []
-    adapter_library = MOCK_RESPONSES.get(adapter_name, {})
+    adapter_library = MOCK_RESPONSES.get(adapter_name) or _generic_mock_for(
+        service_type,
+        adapter_name,
+        provider,
+    )
     baseline_latency = int(adapter_library.get("latency_ms", max(120, int(timeout_ms * 0.6))))
     latency_ms = baseline_latency if not should_fail else int(baseline_latency * 1.05)
     time.sleep(min(latency_ms, 250) / 1000.0)
-
-    if not adapter_library:
-        return {
-            "service_id": service_id,
-            "provider": provider,
-            "service_type": service_type,
-            "adapter": adapter_name,
-            "status": "fail",
-            "latency_ms": latency_ms,
-            "issues": [f"No mock response defined for {adapter_name}"],
-            "response": {},
-            "error_code": None,
-            "mandatory": mandatory,
-        }
 
     response = adapter_library["failure"] if should_fail else adapter_library["success"]
 

@@ -103,6 +103,14 @@ PROVIDER_HINTS = {
 
 MANDATORY_KEYWORDS = ("mandatory", "must", "required", "needs", "required for")
 OPTIONAL_KEYWORDS = ("optional", "preferred", "nice to have", "can use", "may use")
+GENERIC_TYPE_HINTS = {
+    "credit_bureau": ("credit bureau", "bureau", "credit check", "credit checks"),
+    "kyc": ("ekyc", "e-kyc", "kyc", "aadhaar"),
+    "gst": ("gst", "gst verification", "gstin"),
+    "bank_verify": ("penny drop", "bank validation", "bank verification", "account validation"),
+    "payment": ("payment gateway", "collections", "payment"),
+    "fraud": ("fraud", "fraud engine", "risk engine"),
+}
 
 load_dotenv()
 _groq_api_key = os.getenv("GROQ_API_KEY")
@@ -134,6 +142,30 @@ def _sentence_is_mandatory(sentence: str) -> bool:
     return any(keyword in lower for keyword in MANDATORY_KEYWORDS)
 
 
+def _infer_service_type(sentence: str) -> str | None:
+    lower = sentence.lower()
+    for service_type, keywords in GENERIC_TYPE_HINTS.items():
+        if any(keyword in lower for keyword in keywords):
+            return service_type
+    return None
+
+
+def _infer_provider_name(sentence: str) -> str | None:
+    patterns = [
+        r"(?:requires|needs)\s+([A-Z][A-Za-z0-9&-]*(?:\s+[A-Z][A-Za-z0-9&-]+)*)\s+for",
+        r"via\s+([A-Z][A-Za-z0-9&-]*(?:\s+[A-Z][A-Za-z0-9&-]+)*)",
+        r"through\s+([A-Z][A-Za-z0-9&-]*(?:\s+[A-Z][A-Za-z0-9&-]+)*)",
+        r"using\s+([A-Z][A-Za-z0-9&-]*(?:\s+[A-Z][A-Za-z0-9&-]+)*)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, sentence)
+        if match:
+            candidate = match.group(1).strip()
+            if candidate:
+                return candidate
+    return None
+
+
 def _local_parse(text: str) -> ParsedBRD:
     services_by_provider: dict[str, ServiceRequirement] = {}
     sentences = [
@@ -144,10 +176,12 @@ def _local_parse(text: str) -> ParsedBRD:
 
     for sentence in sentences:
         lower_sentence = sentence.lower()
+        matched_known_provider = False
         for provider, meta in PROVIDER_HINTS.items():
             if not any(alias in lower_sentence for alias in meta["aliases"]):
                 continue
 
+            matched_known_provider = True
             mandatory = _sentence_is_mandatory(sentence)
             existing = services_by_provider.get(provider)
             if existing:
@@ -161,6 +195,29 @@ def _local_parse(text: str) -> ParsedBRD:
                 provider=provider,
                 mandatory=mandatory,
             )
+
+        if matched_known_provider:
+            continue
+
+        inferred_type = _infer_service_type(sentence)
+        inferred_provider = _infer_provider_name(sentence)
+        if not inferred_type or not inferred_provider:
+            continue
+
+        provider_key = inferred_provider.strip()
+        mandatory = _sentence_is_mandatory(sentence)
+        existing = services_by_provider.get(provider_key)
+        if existing:
+            existing.mandatory = existing.mandatory or mandatory
+            continue
+
+        services_by_provider[provider_key] = ServiceRequirement(
+            id=_slugify(provider_key),
+            name=f"{provider_key} {inferred_type.replace('_', ' ').title()}",
+            type=inferred_type,
+            provider=provider_key,
+            mandatory=mandatory,
+        )
 
     return ParsedBRD(
         tenant_id=_infer_tenant_id(text),
