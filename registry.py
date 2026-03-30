@@ -188,11 +188,27 @@ def upsert_adapter(
     active: bool = True,
 ) -> dict[str, Any]:
     init_registry()
+    provider = provider.strip()
+    service_type = service_type.strip()
+    adapter = adapter.strip()
+    version = version.strip()
+
+    if not provider:
+        raise ValueError("Provider is required.")
+    if not service_type:
+        raise ValueError("Service type is required.")
+    if not adapter:
+        raise ValueError("Adapter name is required.")
+    if not version:
+        raise ValueError("Version is required.")
+    if int(timeout_ms) <= 0:
+        raise ValueError("Timeout must be greater than 0.")
+
     payload = {
-        "provider": provider.strip(),
-        "service_type": service_type.strip(),
-        "adapter": adapter.strip(),
-        "version": version.strip(),
+        "provider": provider,
+        "service_type": service_type,
+        "adapter": adapter,
+        "version": version,
         "timeout_ms": int(timeout_ms),
         "backup_provider": backup_provider.strip() if backup_provider else None,
         "notes": notes.strip(),
