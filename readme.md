@@ -2,7 +2,7 @@
 
 > Configure enterprise fintech integrations from intent, not code.
 
-FinSpark turns BRDs and SOWs into tenant-scoped integration configs, validates them in a sandbox simulation, heals common failures, and records an audit trail for every run.
+FinSpark turns BRDs and SOWs into tenant-scoped integration configs, validates them in a sandbox simulation, heals common failures, and records an audit trail for every run. The Streamlit app accepts pasted text or uploaded BRD files in PDF, DOCX, and plain-text formats.
 
 ## What is implemented
 
@@ -10,6 +10,7 @@ FinSpark turns BRDs and SOWs into tenant-scoped integration configs, validates t
 - Semantic field mapping with sentence-transformers when enabled, plus a lexical fallback when embeddings are unavailable
 - Per-tenant YAML config generation with versioned history and plain-English diffs
 - SQLite-backed adapter registry with Streamlit admin controls
+- Inline missing-provider registry creation directly in the app flow
 - Sandbox simulation with mandatory vs optional behavior
 - Self-healing loop with deterministic fixes and optional Groq-assisted diagnosis
 - Append-only tenant audit logs
@@ -21,6 +22,7 @@ FinSpark turns BRDs and SOWs into tenant-scoped integration configs, validates t
 ```text
 finspark-engine/
 |-- app.py
+|-- document_loader.py
 |-- parser.py
 |-- mapper.py
 |-- config_gen.py
@@ -46,7 +48,7 @@ See [docs/architecture.mmd](docs/architecture.mmd) for the Mermaid source.
 
 ```mermaid
 flowchart TD
-    A[BRD or SOW text] --> B[parser.py]
+    A[BRD text or uploaded file] --> B[parser.py]
     B --> C[mapper.py]
     C --> D[config_gen.py]
     D --> E[simulator.py]
@@ -92,10 +94,11 @@ Open `http://localhost:8501`.
 ## Demo flow
 
 1. Create or log into a tenant from the sidebar.
-2. Paste a BRD with providers like CIBIL, UIDAI, NIC, GSTN, Razorpay, or PayU.
+2. Paste a BRD or upload a PDF, DOCX, TXT, MD, or BRD text file with providers like CIBIL, UIDAI, NIC, GSTN, Razorpay, or PayU.
 3. Run the pipeline to parse services, map fields, generate a config, simulate adapters, and auto-heal failures.
-4. Inspect the generated diff summary and download the final YAML.
-5. Review the tenant audit trail for previous runs.
+4. If a provider is missing from the registry, add it inline in the app and rerun.
+5. Inspect the generated diff summary and download the final YAML.
+6. Review the tenant audit trail for previous runs.
 
 ## Tenant isolation
 

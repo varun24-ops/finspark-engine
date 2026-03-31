@@ -7,6 +7,7 @@ import streamlit as st
 
 from audit import load_audit_entries, record_pipeline_run
 from config_gen import generate_config
+from document_loader import DocumentLoadError, load_uploaded_document
 from healer import self_heal_config
 from mapper import enrich_field_name, map_fields
 from parser import ParsedBRD, parse_brd
@@ -344,24 +345,66 @@ if not st.session_state.tenant_id:
     st.info("Create or log into a tenant from the sidebar to run a scoped pipeline.")
     st.stop()
 
-st.subheader("Step 1 - Paste your BRD")
+st.subheader("Step 1 - Provide your BRD")
 st.markdown(
-    "<p class='section-note'>Paste a BRD or SOW and FinSpark will extract providers, build config, simulate adapters, and log the run.</p>",
+    "<p class='section-note'>Paste a BRD or upload a PDF, DOCX, or text document. FinSpark will extract the text, detect providers, build config, simulate adapters, and log the run.</p>",
     unsafe_allow_html=True,
 )
-brd_input = st.text_area(
-    label="Requirement document",
-    value=sample_brd,
-    height=160,
-    placeholder="Paste your BRD or SOW text here...",
-    key="brd_input",
+input_mode = st.radio(
+    "Input source",
+    options=["Paste text", "Upload file"],
+    horizontal=True,
 )
+
+source_label = "Pasted text"
+brd_input = ""
+
+if input_mode == "Paste text":
+    brd_input = st.text_area(
+        label="Requirement document",
+        value=sample_brd,
+        height=160,
+        placeholder="Paste your BRD or SOW text here...",
+        key="brd_input",
+    )
+else:
+    uploaded_file = st.file_uploader(
+        "Upload BRD or SOW",
+        type=["pdf", "docx", "txt", "md", "brd"],
+        help="PDF and DOCX uploads are converted into text before parsing.",
+    )
+    if uploaded_file is None:
+        st.caption("Supported formats: PDF, DOCX, TXT, MD, and BRD text files.")
+    else:
+        try:
+            uploaded_document = load_uploaded_document(
+                uploaded_file.name,
+                uploaded_file.getvalue(),
+            )
+            brd_input = uploaded_document.text
+            source_label = uploaded_document.name
+            st.success(
+                f"Loaded `{uploaded_document.name}` with {len(uploaded_document.text):,} characters."
+            )
+            with st.expander("Preview extracted text"):
+                st.text_area(
+                    "Extracted content",
+                    value=uploaded_document.text,
+                    height=220,
+                    disabled=True,
+                    label_visibility="collapsed",
+                )
+        except DocumentLoadError as exc:
+            st.error(str(exc))
 
 run_btn = st.button("Run pipeline", type="primary", width="stretch")
 
 if run_btn:
     if not brd_input.strip():
-        st.error("Please paste a BRD before running.")
+        if input_mode == "Upload file":
+            st.error("Please upload a readable BRD file before running.")
+        else:
+            st.error("Please paste a BRD before running.")
         st.stop()
 
     started_at = time.perf_counter()
@@ -384,6 +427,7 @@ if run_btn:
         st.error("No supported integrations were detected in the BRD.")
         st.stop()
 
+    st.caption(f"Input source: {source_label}")
     col1, col2, col3 = st.columns(3)
     col1.metric("Tenant", parsed.tenant_id)
     col2.metric("Services found", len(parsed.services))
