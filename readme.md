@@ -1,284 +1,143 @@
-# FinSpark — AI Integration Orchestration Engine
+# FinSpark - AI Integration Orchestration Engine
 
-> **Theme:** Configure Enterprise Integrations from Intent, Not Code
+> Configure enterprise fintech integrations from intent, not code.
 
-Transform requirement documents (BRDs, SOWs) into production-ready integration configurations using AI — eliminating weeks of manual configuration work.
+FinSpark turns BRDs and SOWs into tenant-scoped integration configs, validates them in a sandbox simulation, heals common failures, and records an audit trail for every run. The Streamlit app accepts pasted text or uploaded BRD files in PDF, DOCX, and plain-text formats.
 
----
+## What is implemented
 
-## The Problem
+- BRD parsing with Groq Llama 3.3, plus a local fallback parser when no API key is available
+- Semantic field mapping with sentence-transformers when enabled, plus a lexical fallback when embeddings are unavailable
+- Per-tenant YAML config generation with versioned history and plain-English diffs
+- SQLite-backed adapter registry with Streamlit admin controls
+- Inline missing-provider registry creation directly in the app flow
+- Sandbox simulation with mandatory vs optional behavior
+- Self-healing loop with deterministic fixes and optional Groq-assisted diagnosis
+- Append-only tenant audit logs
+- Tenant registration/login with isolated config and audit folders
+- Docker and docker-compose deployment assets
 
-Enterprise lending platforms integrate with bureaus, KYC providers, GST services, fraud engines, and payment gateways. Today this process is:
+## Repository layout
 
-- Manual BRD analysis by implementation teams
-- Repetitive schema mapping across every client
-- Error-prone API version selection
-- Weeks of sandbox testing cycles
-
-**FinSpark reduces this from 6 weeks to under 60 seconds.**
-
----
-
-## What It Does
-
+```text
+finspark-engine/
+|-- app.py
+|-- document_loader.py
+|-- parser.py
+|-- mapper.py
+|-- config_gen.py
+|-- simulator.py
+|-- healer.py
+|-- audit.py
+|-- registry.py
+|-- diff.py
+|-- tenants.py
+|-- templates/
+|   `-- integration_config.yaml.j2
+|-- docs/
+|   `-- architecture.mmd
+|-- Dockerfile
+|-- docker-compose.yml
+|-- requirements.txt
+`-- .env.example
 ```
-Paste BRD text
-      ↓
-AI extracts services + mandatory flags
-      ↓
-Semantic field mapping with confidence scores
-      ↓
-Auto-generated per-tenant YAML config
-      ↓
-Sandbox simulation with fallback validation
-      ↓
-Production-ready integration config
-```
-
----
 
 ## Architecture
 
-```
-finspark-engine/
-│
-├── brd_parser.py        # Stage 1 — NLP parsing with Groq Llama 3.3
-├── mapper.py            # Stage 2 — Semantic field mapping (embeddings)
-├── config_gen.py        # Stage 3 — YAML config generation (Jinja2)
-├── simulator.py         # Stage 4 — Sandbox simulation + fallback
-├── healer.py            # Stage 5 — Self-healing loop (AI auto-fix)
-├── audit.py             # Audit trail — append-only run logs
-├── registry.py          # Dynamic adapter registry (SQLite)
-├── diff.py              # Version diff engine
-├── tenants.py           # Multi-tenant isolation
-├── app.py               # Streamlit UI
-│
-├── templates/
-│   └── adapter_config.yaml.j2   # Jinja2 config template
-│
-├── configs/             # Generated per-tenant YAML configs
-├── tenants/             # Per-tenant isolated data
-├── audit/               # Audit logs
-│
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-└── .env.example
+See [docs/architecture.mmd](docs/architecture.mmd) for the Mermaid source.
+
+```mermaid
+flowchart TD
+    A[BRD text or uploaded file] --> B[parser.py]
+    B --> C[mapper.py]
+    C --> D[config_gen.py]
+    D --> E[simulator.py]
+    E --> F{Failures found?}
+    F -- Yes --> G[healer.py]
+    G --> E
+    F -- No --> H[audit.py]
+    D --> I[diff.py]
+    J[registry.py SQLite] --> D
+    J --> G
+    K[tenants.py workspace isolation] --> D
+    K --> H
+    L[app.py Streamlit UI] --> B
+    L --> J
+    L --> H
 ```
 
----
+## Quick start
 
-## Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| LLM | Groq Llama 3.3 70B | BRD parsing, self-healing |
-| Embeddings | sentence-transformers | Semantic field mapping |
-| Similarity | scikit-learn cosine similarity | Confidence scoring |
-| Templating | Jinja2 | Config generation |
-| Config format | YAML + PyYAML | Integration configs |
-| Validation | Pydantic | Schema enforcement |
-| Database | SQLite | Adapter registry |
-| UI | Streamlit | Browser interface |
-| Deployment | Docker + docker-compose | One-command setup |
-
----
-
-## Quick Start
-
-### Option 1 — Run with Docker (recommended)
+### Local
 
 ```bash
-git clone https://github.com/your-team/finspark-engine
-cd finspark-engine
-cp .env.example .env
-# Add your GROQ_API_KEY to .env
-docker-compose up
-```
-
-Open [http://localhost:8501](http://localhost:8501)
-
-### Option 2 — Run locally
-
-**Prerequisites:**
-- Python 3.10+
-- A free Groq API key from [console.groq.com](https://console.groq.com)
-
-```bash
-git clone https://github.com/your-team/finspark-engine
-cd finspark-engine
-
-# Create virtual environment
-python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # Mac/Linux
-
-# Install dependencies
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
-
-# Set up environment
-cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
-
-# Run the app
+copy .env.example .env
+# add GROQ_API_KEY to .env if you want live LLM parsing/healing
+# set FINSPARK_USE_EMBEDDINGS=true if you want sentence-transformer matching
+# set FINSPARK_ALLOW_MODEL_DOWNLOAD=true if the model is not already cached
 streamlit run app.py
 ```
 
----
+### Docker
 
-## Environment Variables
-
-Create a `.env` file based on `.env.example`:
-
-```env
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxx
+```bash
+copy .env.example .env
+# add GROQ_API_KEY to .env if available
+docker-compose up --build
 ```
 
-Get your free Groq API key at [console.groq.com](https://console.groq.com) — no credit card required.
+Open `http://localhost:8501`.
 
----
+## Demo flow
 
-## How to Use
+1. Create or log into a tenant from the sidebar.
+2. Paste a BRD or upload a PDF, DOCX, TXT, MD, or BRD text file with providers like CIBIL, UIDAI, NIC, GSTN, Razorpay, or PayU.
+3. Run the pipeline to parse services, map fields, generate a config, simulate adapters, and auto-heal failures.
+4. If a provider is missing from the registry, add it inline in the app and rerun.
+5. Inspect the generated diff summary and download the final YAML.
+6. Review the tenant audit trail for previous runs.
 
-### Step 1 — Paste your BRD
+## Tenant isolation
 
-Paste any requirement document into the text area. Example:
+Each tenant gets a dedicated workspace under `tenants/<tenant_id>/`:
 
-```
-Acme Lending requires CIBIL for credit bureau checks (mandatory).
-UIDAI Aadhaar eKYC is mandatory for all borrowers.
-GST verification via NIC is optional for MSME loans.
-Razorpay penny drop is mandatory for bank account validation.
-```
+- `configs/current.yaml` for the latest generated config
+- `configs/<timestamp>_adapters.yaml` for versioned history
+- `audit/runs.jsonl` for append-only audit entries
 
-### Step 2 — Run the pipeline
+## Adapter registry
 
-Click **Run pipeline**. The engine will:
+The registry is stored in SQLite at `data/registry.db`.
 
-1. Extract all integration services using AI
-2. Map your schema fields to each provider's API fields
-3. Generate a production-ready YAML config
-4. Simulate each integration in sandbox
-5. Auto-fix any failures (self-healing)
-6. Log the run to the audit trail
+- Seed adapters are created automatically on first run
+- Admins can add, edit, or disable adapters from the Streamlit sidebar
+- Config generation and self-healing both read from the same registry source
 
-### Step 3 — Download config
+## Self-healing behavior
 
-Download the generated YAML config file directly from the UI.
+When a simulation fails, the engine can:
 
-### Step 4 — Test failure scenarios
+- increase adapter timeouts
+- restore vault-backed auth references
+- switch to a configured backup provider
+- preserve stricter fallback behavior for mandatory services
 
-Use the sidebar to force specific adapters to fail — demonstrates the self-healing loop and fallback behavior live.
+If a `GROQ_API_KEY` is configured, FinSpark also asks Groq for a short diagnosis summary for each healing attempt.
 
----
+## Security notes
 
-## Supported Providers
+- Secrets are referenced as `vault://...` values and are never written into configs
+- Tenant data is isolated by directory and access code
+- Audit logs are append-only JSONL records
+- Optional integrations can degrade to `skip`; mandatory integrations remain `fail_closed`
 
-| Provider | Type | Adapter |
-|----------|------|---------|
-| CIBIL | Credit Bureau | cibil-bureau-adapter@v3.1 |
-| Experian | Credit Bureau | experian-bureau-adapter@v2.9 |
-| UIDAI | eKYC | uidai-ekyc-adapter@v2.4 |
-| NIC | GST Verification | nic-gst-adapter@v1.8 |
-| GSTN | GST Verification | gstn-verification-adapter@v1.2 |
-| Razorpay | Bank Verification | razorpay-penny-drop-adapter@v4.0 |
-| PayU | Payment Gateway | payu-payment-gateway-adapter@v5.3 |
+## Hackathon value
 
-New providers can be added through the admin panel — no code changes required.
-
----
-
-## Sample Output
-
-### Parsed requirements
-```json
-{
-  "tenant_id": "acme_lending",
-  "services": [
-    { "id": "cibil", "type": "credit_bureau", "provider": "CIBIL", "mandatory": true },
-    { "id": "uidai_ekyc", "type": "kyc", "provider": "UIDAI", "mandatory": true },
-    { "id": "gst_nic", "type": "gst", "provider": "NIC", "mandatory": false }
-  ]
-}
-```
-
-### Generated config
-```yaml
-tenant_id: acme_lending
-version: "1.0.0"
-environment: sandbox
-
-integrations:
-  cibil:
-    adapter: cibil-bureau-adapter@v3.1
-    mandatory: true
-    auth: vault://acme_lending/cibil/api_key
-    timeout_ms: 3000
-    fallback: fail_closed
-
-  gst_nic:
-    adapter: nic-gst-adapter@v1.8
-    mandatory: false
-    auth: vault://acme_lending/gst_nic/api_key
-    timeout_ms: 2500
-    fallback: skip
-```
-
-### Simulation results
-```
-✅ cibil-bureau-adapter       — 1200ms — pass
-✅ uidai-ekyc-adapter         — 890ms  — pass
-✅ nic-gst-adapter            — 654ms  — pass
-✅ razorpay-penny-drop-adapter — 445ms  — pass
-
-All mandatory integrations passed. Config is ready for deployment.
-```
-
----
-
-## Security Design
-
-| Concern | Implementation |
-|---------|---------------|
-| Credentials | Never stored in config — vault:// references only |
-| Tenant isolation | Per-tenant folders, scoped configs and audit logs |
-| Audit trail | Append-only JSON log of every pipeline run |
-| Fallback | Mandatory services fail_closed, optional services skip |
-| Secrets | Loaded from .env, never hardcoded |
-
----
-
-## Business Impact
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Implementation cycle | 4-6 weeks | Under 60 seconds |
-| Config defect rate | High (manual) | Near zero (validated) |
-| Client onboarding | Weeks | Hours |
-| Audit readiness | Manual effort | Automatic |
-
----
-
-## Scoring Criteria Coverage
-
-| Criteria | Weight | How we address it |
-|----------|--------|------------------|
-| Enterprise Realism | 20% | Real fintech providers, vault references, fallback rules, per-tenant isolation |
-| AI Practicality | 15% | Groq LLM for parsing, embeddings for mapping, confidence scoring |
-| Backward Compatibility | 15% | Version pinning, diff engine, migration warnings |
-| Multi-Tenant Scalability | 15% | Per-tenant folders, scoped configs, SQLite registry |
-| Security & Compliance | 15% | Vault references, audit trail, no plaintext secrets |
-| Business Impact | 10% | 6 weeks → 60 seconds, validated configs, faster onboarding |
-| Ease of Deployability | 10% | Docker one-command setup, clear README, .env.example |
-
----
-
-## Team
-
-Built at FinSpark Hackathon 2026
-
----
-
-## License
-
-MIT
+- Enterprise realism: real provider registry, versioning, vault references, and fallback rules
+- AI practicality: LLM parsing and repair support, with deterministic fallbacks for demos
+- Multi-tenant scalability: tenant login, isolated storage, shared registry
+- Security and compliance: append-only audit log, no plaintext secrets in config
+- Deployability: one-command Docker workflow and minimal local setup
