@@ -8,6 +8,49 @@ from typing import Any
 DATA_DIR = Path("data")
 REGISTRY_DB = DATA_DIR / "registry.db"
 
+REGISTRY_POLICY_DEFAULTS = {
+    "Razorpay": {
+        "role": "primary",
+        "mandatory_default": True,
+        "fallback_mode": "fail_closed",
+        "capabilities": ["account_validation", "name_match"],
+    },
+    "CIBIL": {
+        "role": "primary",
+        "mandatory_default": True,
+        "fallback_mode": "use_backup",
+        "backup_provider": "Experian",
+    },
+    "Experian": {
+        "role": "fallback",
+        "mandatory_default": False,
+        "fallback_mode": "fail_closed",
+        "backup_provider": None,
+    },
+    "UIDAI": {
+        "role": "primary",
+        "mandatory_default": True,
+        "fallback_mode": "fail_closed",
+    },
+    "NIC": {
+        "role": "primary",
+        "mandatory_default": False,
+        "fallback_mode": "use_backup",
+        "backup_provider": "GSTN",
+    },
+    "GSTN": {
+        "role": "fallback",
+        "mandatory_default": False,
+        "fallback_mode": "fail_closed",
+        "backup_provider": None,
+    },
+    "PayU": {
+        "role": "primary",
+        "mandatory_default": True,
+        "fallback_mode": "fail_closed",
+    },
+}
+
 SEED_ADAPTERS = [
     {
         "provider": "CIBIL",
@@ -91,6 +134,33 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     record = dict(row)
     record["active"] = bool(record.pop("is_active"))
+    return _decorate_record(record)
+
+
+def _decorate_record(record: dict[str, Any]) -> dict[str, Any]:
+    defaults = REGISTRY_POLICY_DEFAULTS.get(record["provider"], {})
+    backup_provider = defaults.get("backup_provider", record.get("backup_provider"))
+    mandatory_default = bool(
+        defaults.get(
+            "mandatory_default",
+            record.get("service_type") in {"kyc", "bank_verify"},
+        )
+    )
+    fallback_mode = str(
+        defaults.get(
+            "fallback_mode",
+            "use_backup"
+            if backup_provider
+            else "fail_closed"
+            if mandatory_default
+            else "skip",
+        )
+    )
+    record["backup_provider"] = backup_provider
+    record["role"] = defaults.get("role", "primary")
+    record["mandatory_default"] = mandatory_default
+    record["fallback_mode"] = fallback_mode
+    record["capabilities"] = list(defaults.get("capabilities", []))
     return record
 
 
