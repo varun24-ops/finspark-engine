@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,9 +118,60 @@ SEED_ADAPTERS = [
     },
 ]
 
+VERSION_SEPARATOR_RE = re.compile(r"\s*[,|;/]\s*")
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _version_sort_key(label: str) -> tuple[int, ...]:
+    numbers = re.findall(r"\d+", label)
+    return tuple(int(value) for value in numbers) or (0,)
+
+
+def _normalize_version_label(value: str) -> str:
+    cleaned = str(value).strip().strip("[]")
+    if not cleaned:
+        return ""
+    if cleaned.lower().startswith("v"):
+        cleaned = cleaned[1:]
+    numbers = re.findall(r"\d+", cleaned)
+    if numbers:
+        return f"v{'.'.join(numbers)}"
+    return str(value).strip()
+
+
+def _parse_version_catalog(raw_value: Any) -> list[str]:
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, (list, tuple, set)):
+        raw_items = [str(item) for item in raw_value]
+    else:
+        cleaned = str(raw_value).strip().strip("[]")
+        if not cleaned:
+            return []
+        raw_items = VERSION_SEPARATOR_RE.split(cleaned) if VERSION_SEPARATOR_RE.search(cleaned) else [cleaned]
+
+    versions = []
+    for item in raw_items:
+        normalized = _normalize_version_label(item)
+        if normalized and normalized not in versions:
+            versions.append(normalized)
+
+    versions.sort(key=_version_sort_key)
+    return versions
+
+
+def _resolve_version_label(available_versions: list[str], preferred_version: str | None = None) -> str:
+    if preferred_version:
+        normalized = _normalize_version_label(preferred_version)
+        if normalized in available_versions:
+            return normalized
+    if available_versions:
+        return available_versions[-1]
+    return _normalize_version_label(preferred_version or "v1.0")
 
 
 def _connect(db_path: Path = REGISTRY_DB) -> sqlite3.Connection:
@@ -129,16 +181,24 @@ def _connect(db_path: Path = REGISTRY_DB) -> sqlite3.Connection:
     return connection
 
 
-def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def _row_to_dict(
+    row: sqlite3.Row | None,
+    preferred_version: str | None = None,
+) -> dict[str, Any] | None:
     if row is None:
         return None
     record = dict(row)
     record["active"] = bool(record.pop("is_active"))
-    return _decorate_record(record)
+    return _decorate_record(record, preferred_version=preferred_version)
 
 
-def _decorate_record(record: dict[str, Any]) -> dict[str, Any]:
+def _decorate_record(
+    record: dict[str, Any],
+    preferred_version: str | None = None,
+) -> dict[str, Any]:
     defaults = REGISTRY_POLICY_DEFAULTS.get(record["provider"], {})
+    available_versions = _parse_version_catalog(record.get("version"))
+    selected_version = _resolve_version_label(available_versions, preferred_version)
     backup_provider = defaults.get("backup_provider", record.get("backup_provider"))
     mandatory_default = bool(
         defaults.get(
@@ -161,6 +221,11 @@ def _decorate_record(record: dict[str, Any]) -> dict[str, Any]:
     record["mandatory_default"] = mandatory_default
     record["fallback_mode"] = fallback_mode
     record["capabilities"] = list(defaults.get("capabilities", []))
+    record["available_versions"] = available_versions or [selected_version]
+    record["version"] = selected_version
+    record["version_strategy"] = (
+        "latest_available" if len(record["available_versions"]) > 1 else "fixed"
+    )
     return record
 
 
@@ -228,7 +293,7 @@ def list_adapters(include_inactive: bool = False) -> list[dict[str, Any]]:
     return [_row_to_dict(row) for row in rows if row is not None]
 
 
-def get_adapter(provider: str) -> dict[str, Any] | None:
+def get_adapter(provider: str, preferred_version: str | None = None) -> dict[str, Any] | None:
     init_registry()
     with _connect() as connection:
         row = connection.execute(
@@ -240,7 +305,7 @@ def get_adapter(provider: str) -> dict[str, Any] | None:
             """,
             (provider,),
         ).fetchone()
-    return _row_to_dict(row)
+    return _row_to_dict(row, preferred_version=preferred_version)
 
 
 def registry_as_map() -> dict[str, dict[str, Any]]:
@@ -262,6 +327,7 @@ def upsert_adapter(
     service_type = service_type.strip()
     adapter = adapter.strip()
     version = version.strip()
+    normalized_versions = _parse_version_catalog(version)
 
     if not provider:
         raise ValueError("Provider is required.")
@@ -269,8 +335,8 @@ def upsert_adapter(
         raise ValueError("Service type is required.")
     if not adapter:
         raise ValueError("Adapter name is required.")
-    if not version:
-        raise ValueError("Version is required.")
+    if not normalized_versions:
+        raise ValueError("At least one valid version is required.")
     if int(timeout_ms) <= 0:
         raise ValueError("Timeout must be greater than 0.")
 
@@ -278,7 +344,7 @@ def upsert_adapter(
         "provider": provider,
         "service_type": service_type,
         "adapter": adapter,
-        "version": version,
+        "version": ", ".join(normalized_versions),
         "timeout_ms": int(timeout_ms),
         "backup_provider": backup_provider.strip() if backup_provider else None,
         "notes": notes.strip(),

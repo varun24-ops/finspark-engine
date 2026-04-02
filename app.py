@@ -8,6 +8,7 @@ import streamlit as st
 from audit import load_audit_entries, record_pipeline_run
 from config_gen import generate_config
 from document_loader import DocumentLoadError, load_uploaded_document
+from errors import FinSparkError
 from healer import self_heal_config
 from mapper import enrich_field_name, map_fields
 from parser import ParsedBRD, parse_brd
@@ -323,7 +324,11 @@ with st.sidebar:
                 options=SERVICE_TYPE_OPTIONS,
             )
             adapter = st.text_input("Adapter name")
-            version = st.text_input("Version", value="v1.0")
+            version = st.text_input(
+                "Version(s)",
+                value="v1.0",
+                help="Use a comma-separated catalog like `v1.0, v1.1`. FinSpark will select the latest approved version.",
+            )
             timeout_ms = st.number_input("Timeout (ms)", min_value=100, value=2000, step=100)
             backup_provider = st.text_input("Backup provider")
             notes = st.text_area("Notes")
@@ -423,259 +428,289 @@ if run_btn:
         st.stop()
 
     started_at = time.perf_counter()
-
-    st.divider()
-    _render_section_title("Step 2 - Parsed requirements")
-    st.markdown(
-        "<p class='section-note'>Detected services are summarized below before registry resolution and config generation.</p>",
-        unsafe_allow_html=True,
-    )
-    with st.spinner("Parsing BRD with Llama 3.3 or fallback rules..."):
-        parsed = parse_brd(brd_input)
-
-    parsed = ParsedBRD(
-        tenant_id=st.session_state.tenant_id,
-        services=parsed.services,
-    )
-
-    if not parsed.services:
-        st.error("No supported integrations were detected in the BRD.")
-        st.stop()
-
-    st.caption(f"Input source: {source_label}")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Tenant", parsed.tenant_id)
-    col2.metric("Services found", len(parsed.services))
-    col3.metric("Mandatory", sum(1 for service in parsed.services if service.mandatory))
-
-    _render_service_cards(parsed.services)
-
-    with st.expander("View raw JSON"):
-        st.json(parsed.model_dump())
-
-    missing_registry_services = _missing_registry_services(parsed)
-    if missing_registry_services:
+    try:
         st.divider()
-        _render_section_title("Resolve Missing Registry Entries")
-        st.warning(
-            "Some providers from this BRD are not in the adapter registry yet. "
-            "Add them below, then click Run pipeline again."
-        )
-
-        for service in missing_registry_services:
-            with st.form(f"missing_registry_{service.provider}_{service.type}"):
-                provider_value = st.text_input(
-                    "Provider",
-                    value=service.provider,
-                    key=f"missing_provider_{service.provider}_{service.type}",
-                )
-                service_type = st.selectbox(
-                    "Service type",
-                    options=SERVICE_TYPE_OPTIONS,
-                    index=SERVICE_TYPE_OPTIONS.index(
-                        service.type if service.type in SERVICE_TYPE_OPTIONS else "other"
-                    ),
-                    key=f"missing_service_type_{service.provider}_{service.type}",
-                )
-                adapter_name = st.text_input(
-                    "Adapter name",
-                    value=_default_adapter_name(service.provider, service.type),
-                    key=f"missing_adapter_{service.provider}_{service.type}",
-                )
-                version = st.text_input(
-                    "Version",
-                    value="v1.0",
-                    key=f"missing_version_{service.provider}_{service.type}",
-                )
-                timeout_ms = st.number_input(
-                    "Timeout (ms)",
-                    min_value=100,
-                    value=_default_timeout(service.type),
-                    step=100,
-                    key=f"missing_timeout_{service.provider}_{service.type}",
-                )
-                backup_provider = st.text_input(
-                    "Backup provider",
-                    value="",
-                    key=f"missing_backup_{service.provider}_{service.type}",
-                )
-                notes = st.text_area(
-                    "Notes",
-                    value=f"Added dynamically from BRD-detected provider {service.provider}.",
-                    key=f"missing_notes_{service.provider}_{service.type}",
-                )
-                add_missing_registry = st.form_submit_button(
-                    f"Add {service.provider} to registry",
-                    width="stretch",
-                )
-
-            if add_missing_registry:
-                try:
-                    upsert_adapter(
-                        provider=provider_value,
-                        service_type=service_type,
-                        adapter=adapter_name,
-                        version=version,
-                        timeout_ms=int(timeout_ms),
-                        backup_provider=backup_provider or None,
-                        notes=notes,
-                    )
-                    st.success(f"{provider_value} added to registry. Click Run pipeline again.")
-                    st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
-
-        st.stop()
-
-    st.divider()
-    _render_section_title("Step 3 - Field mappings (reference CIBIL adapter)")
-    st.markdown(
-        "<p class='section-note'>Mappings stay demo-friendly offline and can switch to embeddings when explicitly enabled.</p>",
-        unsafe_allow_html=True,
-    )
-
-    source_fields = [
-        "borrower.pan_number",
-        "borrower.date_of_birth",
-        "borrower.mobile_number",
-        "loan.amount_requested",
-        "loan.tenure_months",
-        "loan.product_type",
-    ]
-    target_fields = [
-        "applicant.panCard",
-        "applicant.dateOfBirth",
-        "applicant.mobileNumber",
-        "enquiry.loanAmount",
-        "enquiry.tenureInMonths",
-        "enquiry.creditProductType",
-    ]
-
-    with st.spinner("Running semantic field mapping..."):
-        enriched_source = [enrich_field_name(value) for value in source_fields]
-        enriched_target = [enrich_field_name(value) for value in target_fields]
-        mappings = map_fields(enriched_source, enriched_target)
-
-    for index, mapping in enumerate(mappings):
-        target_index = enriched_target.index(mapping["target"])
-        col1, col2, col3, col4 = st.columns([3, 3, 1, 1])
-        col1.code(source_fields[index])
-        col2.code(target_fields[target_index])
-        col3.metric("Confidence", f"{mapping['confidence']:.0%}")
-        if mapping["status"] == "mapped":
-            col4.success("auto")
-        else:
-            col4.warning("review")
-
-    st.divider()
-    _render_section_title("Step 4 - Generated config")
-    st.markdown(
-        "<p class='section-note'>Configs are versioned per tenant and compared against the previous version in plain English.</p>",
-        unsafe_allow_html=True,
-    )
-    with st.spinner("Generating YAML config..."):
-        generated_config = generate_config(parsed)
-
-    config_yaml = generated_config.current_path.read_text(encoding="utf-8")
-    st.info(generated_config.diff_summary)
-    st.code(config_yaml, language="yaml")
-    st.download_button(
-        label="Download config YAML",
-        data=config_yaml,
-        file_name=f"{parsed.tenant_id}_config.yaml",
-        mime="text/yaml",
-    )
-
-    st.divider()
-    _render_section_title("Step 5 - Sandbox simulation")
-    st.markdown(
-        "<p class='section-note'>Simulation validates required fields, timeout behavior, and fallback outcomes for each adapter.</p>",
-        unsafe_allow_html=True,
-    )
-    with st.spinner("Running simulation..."):
-        results = run_simulation(generated_config.current_path, fail_adapters=set(force_fail))
-
-    healing_report = None
-    if any(result["status"] == "fail" for result in results):
-        with st.spinner("Applying self-healing and re-running simulation..."):
-            healing_report = self_heal_config(
-                generated_config.current_path,
-                fail_adapters=set(force_fail),
-                max_retries=3,
-            )
-            results = healing_report["results"]
-            config_yaml = healing_report["config_yaml"]
-
-    summary = summarize_results(results)
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total", summary["total"])
-    col2.metric("Passed", summary["passed"])
-    col3.metric("Failed", summary["failed"])
-    col4.metric("Warnings", summary["warnings"])
-
-    for result in results:
-        if result["status"] == "pass":
-            icon = "[PASS]"
-            render = st.success
-        elif result["status"] == "fail":
-            icon = "[FAIL]"
-            render = st.error
-        else:
-            icon = "[WARN]"
-            render = st.warning
-
-        render(f"{icon} **{result['adapter']}** - {result['latency_ms']}ms - {result['status']}")
-        for issue in result["issues"]:
-            st.caption(f"    {issue}")
-
-    if healing_report and healing_report["attempt_count"]:
-        st.divider()
-        _render_section_title("Step 6 - Self-healing actions")
+        _render_section_title("Step 2 - Parsed requirements")
         st.markdown(
-            "<p class='section-note'>FinSpark applies bounded fixes, explains each attempt, and reruns the simulation automatically.</p>",
+            "<p class='section-note'>Detected services are summarized below before registry resolution and config generation.</p>",
             unsafe_allow_html=True,
         )
-        for attempt in healing_report["attempts"]:
-            with st.expander(f"Attempt {attempt['attempt']}", expanded=True):
-                for diagnosis in attempt["diagnoses"]:
-                    st.write(diagnosis)
-                for action in attempt["actions"]:
-                    st.code(action, language=None)
-                st.caption(attempt["diff_summary"])
+        with st.spinner("Parsing BRD with Llama 3.3 or fallback rules..."):
+            parsed_result = parse_brd(brd_input)
 
-        _render_section_title("Healed config")
-        st.code(config_yaml, language="yaml")
-
-    duration_ms = int((time.perf_counter() - started_at) * 1000)
-    audit_entry, audit_path = record_pipeline_run(
-        tenant_id=parsed.tenant_id,
-        parsed_payload=parsed.model_dump(),
-        simulation_results=results,
-        duration_ms=duration_ms,
-        config_path=generated_config.current_path,
-        healed=bool(healing_report and healing_report["healed"]),
-        healing_attempts=healing_report["attempt_count"] if healing_report else 0,
-        diff_summary=generated_config.diff_summary,
-    )
-
-    st.divider()
-    _render_section_title("Step 7 - Audit trail")
-    st.markdown(
-        "<p class='section-note'>Every pipeline run is appended to the tenant audit log with timing and simulation details.</p>",
-        unsafe_allow_html=True,
-    )
-    st.caption(f"Appended run log at `{audit_path}`")
-    st.json(audit_entry)
-
-    recent_entries = load_audit_entries(parsed.tenant_id, limit=5)
-    if recent_entries:
-        st.caption("Recent runs for this tenant")
-        st.dataframe(recent_entries, width="stretch")
-
-    st.divider()
-    if summary["failed"] == 0:
-        st.success("All mandatory integrations passed. Config is ready for deployment.")
-    else:
-        st.error(
-            f"{summary['failed']} mandatory integration(s) failed. Review issues before deploying."
+        parsed = ParsedBRD(
+            tenant_id=st.session_state.tenant_id,
+            services=parsed_result.services,
+            parse_mode=parsed_result.parse_mode,
+            parser_notes=parsed_result.parser_notes,
         )
+
+        if not parsed.services:
+            st.error("No supported integrations were detected in the BRD.")
+            st.stop()
+
+        st.caption(f"Input source: {source_label}")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Tenant", parsed.tenant_id)
+        col2.metric("Services found", len(parsed.services))
+        col3.metric("Mandatory", sum(1 for service in parsed.services if service.mandatory))
+        col4.metric("Parse mode", parsed.parse_mode)
+
+        _render_service_cards(parsed.services)
+
+        with st.expander("View extraction diagnostics"):
+            for note in parsed.parser_notes:
+                st.write(f"- {note}")
+            for service in parsed.services:
+                st.markdown(
+                    f"**{service.provider}** | `{service.type}` | confidence `{service.confidence:.0%}`"
+                )
+                for signal in service.evidence:
+                    st.caption(signal)
+
+        with st.expander("View raw JSON"):
+            st.json(parsed.model_dump())
+
+        missing_registry_services = _missing_registry_services(parsed)
+        if missing_registry_services:
+            st.divider()
+            _render_section_title("Resolve Missing Registry Entries")
+            st.warning(
+                "Some providers from this BRD are not in the adapter registry yet. "
+                "Add them below, then click Run pipeline again."
+            )
+
+            for service in missing_registry_services:
+                with st.form(f"missing_registry_{service.provider}_{service.type}"):
+                    provider_value = st.text_input(
+                        "Provider",
+                        value=service.provider,
+                        key=f"missing_provider_{service.provider}_{service.type}",
+                    )
+                    service_type = st.selectbox(
+                        "Service type",
+                        options=SERVICE_TYPE_OPTIONS,
+                        index=SERVICE_TYPE_OPTIONS.index(
+                            service.type if service.type in SERVICE_TYPE_OPTIONS else "other"
+                        ),
+                        key=f"missing_service_type_{service.provider}_{service.type}",
+                    )
+                    adapter_name = st.text_input(
+                        "Adapter name",
+                        value=_default_adapter_name(service.provider, service.type),
+                        key=f"missing_adapter_{service.provider}_{service.type}",
+                    )
+                    version = st.text_input(
+                        "Version(s)",
+                        value="v1.0",
+                        help="Use a comma-separated catalog like `v1.0, v1.1`. FinSpark will select the latest approved version.",
+                        key=f"missing_version_{service.provider}_{service.type}",
+                    )
+                    timeout_ms = st.number_input(
+                        "Timeout (ms)",
+                        min_value=100,
+                        value=_default_timeout(service.type),
+                        step=100,
+                        key=f"missing_timeout_{service.provider}_{service.type}",
+                    )
+                    backup_provider = st.text_input(
+                        "Backup provider",
+                        value="",
+                        key=f"missing_backup_{service.provider}_{service.type}",
+                    )
+                    notes = st.text_area(
+                        "Notes",
+                        value=f"Added dynamically from BRD-detected provider {service.provider}.",
+                        key=f"missing_notes_{service.provider}_{service.type}",
+                    )
+                    add_missing_registry = st.form_submit_button(
+                        f"Add {service.provider} to registry",
+                        width="stretch",
+                    )
+
+                if add_missing_registry:
+                    try:
+                        upsert_adapter(
+                            provider=provider_value,
+                            service_type=service_type,
+                            adapter=adapter_name,
+                            version=version,
+                            timeout_ms=int(timeout_ms),
+                            backup_provider=backup_provider or None,
+                            notes=notes,
+                        )
+                        st.success(f"{provider_value} added to registry. Click Run pipeline again.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+            st.stop()
+
+        st.divider()
+        _render_section_title("Step 3 - Field mappings (reference CIBIL adapter)")
+        st.markdown(
+            "<p class='section-note'>Mappings stay demo-friendly offline and can switch to embeddings when explicitly enabled.</p>",
+            unsafe_allow_html=True,
+        )
+
+        source_fields = [
+            "borrower.pan_number",
+            "borrower.date_of_birth",
+            "borrower.mobile_number",
+            "loan.amount_requested",
+            "loan.tenure_months",
+            "loan.product_type",
+        ]
+        target_fields = [
+            "applicant.panCard",
+            "applicant.dateOfBirth",
+            "applicant.mobileNumber",
+            "enquiry.loanAmount",
+            "enquiry.tenureInMonths",
+            "enquiry.creditProductType",
+        ]
+
+        with st.spinner("Running semantic field mapping..."):
+            enriched_source = [enrich_field_name(value) for value in source_fields]
+            enriched_target = [enrich_field_name(value) for value in target_fields]
+            mappings = map_fields(enriched_source, enriched_target)
+
+        for index, mapping in enumerate(mappings):
+            target_index = enriched_target.index(mapping["target"])
+            col1, col2, col3, col4 = st.columns([3, 3, 1, 1])
+            col1.code(source_fields[index])
+            col2.code(target_fields[target_index])
+            col3.metric("Confidence", f"{mapping['confidence']:.0%}")
+            if mapping["status"] == "mapped":
+                col4.success("auto")
+            else:
+                col4.warning("review")
+
+        st.divider()
+        _render_section_title("Step 4 - Generated config")
+        st.markdown(
+            "<p class='section-note'>Configs are versioned per tenant, resolved against the latest approved adapter versions, and compared against the previous version in plain English.</p>",
+            unsafe_allow_html=True,
+        )
+        with st.spinner("Generating YAML config..."):
+            generated_config = generate_config(parsed)
+
+        config_yaml = generated_config.current_path.read_text(encoding="utf-8")
+        st.info(generated_config.diff_summary)
+        st.caption(
+            f"Current config version `{generated_config.version_label}` | previous "
+            f"`{generated_config.previous_version_label or 'none'}` | history "
+            f"`{generated_config.version_history_count}`"
+        )
+        st.code(config_yaml, language="yaml")
+        st.download_button(
+            label="Download config YAML",
+            data=config_yaml,
+            file_name=f"{parsed.tenant_id}_config.yaml",
+            mime="text/yaml",
+        )
+
+        st.divider()
+        _render_section_title("Step 5 - Sandbox simulation")
+        st.markdown(
+            "<p class='section-note'>Simulation validates adapter payloads, registry policy rules, fallback chains, and approved adapter versions for each integration.</p>",
+            unsafe_allow_html=True,
+        )
+        with st.spinner("Running simulation..."):
+            results = run_simulation(generated_config.current_path, fail_adapters=set(force_fail))
+
+        healing_report = None
+        if any(result["status"] == "fail" for result in results):
+            with st.spinner("Applying self-healing and re-running simulation..."):
+                healing_report = self_heal_config(
+                    generated_config.current_path,
+                    fail_adapters=set(force_fail),
+                    max_retries=3,
+                )
+                results = healing_report["results"]
+                config_yaml = healing_report["config_yaml"]
+
+        summary = summarize_results(results)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total", summary["total"])
+        col2.metric("Passed", summary["passed"])
+        col3.metric("Failed", summary["failed"])
+        col4.metric("Warnings", summary["warnings"])
+
+        for result in results:
+            if result["status"] == "pass":
+                icon = "[PASS]"
+                render = st.success
+            elif result["status"] == "fail":
+                icon = "[FAIL]"
+                render = st.error
+            else:
+                icon = "[WARN]"
+                render = st.warning
+
+            render(f"{icon} **{result['adapter']}** - {result['latency_ms']}ms - {result['status']}")
+            st.caption(
+                f"Technical: {result.get('technical_status', 'unknown')} | "
+                f"Policy: {result.get('policy_status', 'unknown')}"
+            )
+            for issue in result["issues"]:
+                st.caption(f"    {issue}")
+
+        if healing_report and healing_report["attempt_count"]:
+            st.divider()
+            _render_section_title("Step 6 - Self-healing actions")
+            st.markdown(
+                "<p class='section-note'>FinSpark applies bounded fixes, restores registry-aligned controls, explains each attempt, and reruns the simulation automatically.</p>",
+                unsafe_allow_html=True,
+            )
+            for attempt in healing_report["attempts"]:
+                with st.expander(f"Attempt {attempt['attempt']}", expanded=True):
+                    for diagnosis in attempt["diagnoses"]:
+                        st.write(diagnosis)
+                    for action in attempt["actions"]:
+                        st.code(action, language=None)
+                    st.caption(attempt["diff_summary"])
+
+            _render_section_title("Healed config")
+            st.code(config_yaml, language="yaml")
+
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        audit_entry, audit_path = record_pipeline_run(
+            tenant_id=parsed.tenant_id,
+            parsed_payload=parsed.model_dump(),
+            simulation_results=results,
+            duration_ms=duration_ms,
+            config_path=generated_config.current_path,
+            healed=bool(healing_report and healing_report["healed"]),
+            healing_attempts=healing_report["attempt_count"] if healing_report else 0,
+            diff_summary=generated_config.diff_summary,
+        )
+
+        st.divider()
+        _render_section_title("Step 7 - Audit trail")
+        st.markdown(
+            "<p class='section-note'>Every pipeline run is appended to the tenant audit log with timing, parser diagnostics, and policy-aware simulation details.</p>",
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Appended run log at `{audit_path}`")
+        st.json(audit_entry)
+
+        recent_entries = load_audit_entries(parsed.tenant_id, limit=5)
+        if recent_entries:
+            st.caption("Recent runs for this tenant")
+            st.dataframe(recent_entries, width="stretch")
+
+        st.divider()
+        if summary["failed"] == 0:
+            st.success("All mandatory integrations passed. Config is ready for deployment.")
+        else:
+            st.error(
+                f"{summary['failed']} mandatory integration(s) failed. Review issues before deploying."
+            )
+    except FinSparkError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:
+        st.error("Unexpected pipeline error. The app stayed running so you can correct the input and retry.")
+        st.exception(exc)
+        st.stop()

@@ -7,12 +7,14 @@ from io import BytesIO
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+from errors import DocumentProcessingError
+
 
 WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 TEXT_SUFFIXES = {".txt", ".md", ".brd"}
 
 
-class DocumentLoadError(ValueError):
+class DocumentLoadError(DocumentProcessingError, ValueError):
     """Raised when an uploaded document cannot be converted into BRD text."""
 
 

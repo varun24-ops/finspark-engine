@@ -26,6 +26,12 @@ def build_audit_entry(
     passed = sum(1 for result in simulation_results if result["status"] == "pass")
     failed = sum(1 for result in simulation_results if result["status"] == "fail")
     warned = sum(1 for result in simulation_results if result["status"] == "warn")
+    policy_failed = sum(
+        1 for result in simulation_results if result.get("policy_status") == "fail"
+    )
+    policy_warned = sum(
+        1 for result in simulation_results if result.get("policy_status") == "warn"
+    )
 
     return {
         "run_id": str(uuid.uuid4()),
@@ -42,14 +48,19 @@ def build_audit_entry(
                 "provider": service["provider"],
                 "mandatory": service["mandatory"],
                 "type": service["type"],
+                "confidence": service.get("confidence"),
             }
             for service in parsed_payload.get("services", [])
         ],
+        "parse_mode": parsed_payload.get("parse_mode", "unknown"),
+        "parser_notes": parsed_payload.get("parser_notes", []),
         "simulation_summary": {
             "total": len(simulation_results),
             "passed": passed,
             "failed": failed,
             "warned": warned,
+            "policy_failed": policy_failed,
+            "policy_warned": policy_warned,
         },
         "simulation_results": simulation_results,
     }
