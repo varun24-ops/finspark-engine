@@ -26,7 +26,13 @@ class GeneratedConfig:
     diff_payload: dict | None = None
     diff_summary: str = "First config version generated for this tenant."
 
-def fallback_rule(mandatory: bool) -> str:
+
+def fallback_rule(mandatory: bool, registry_entry: dict[str, object]) -> str:
+    fallback_mode = str(registry_entry.get("fallback_mode", "")).strip()
+    if fallback_mode:
+        return fallback_mode
+    if registry_entry.get("backup_provider"):
+        return "use_backup"
     return "fail_closed" if mandatory else "skip"
 
 
@@ -37,18 +43,21 @@ def _build_enriched_services(parsed: ParsedBRD) -> list[dict[str, str | int | bo
         if not registry_entry:
             raise ValueError(f"No adapter registry entry for provider: {svc.provider}")
 
+        mandatory = bool(svc.mandatory or registry_entry.get("mandatory_default", False))
+
         enriched_services.append(
             {
                 "id": svc.id,
                 "name": svc.name,
                 "type": svc.type,
                 "provider": registry_entry["provider"],
-                "mandatory": svc.mandatory,
+                "mandatory": mandatory,
                 "adapter": registry_entry["adapter"],
                 "version": registry_entry["version"],
                 "timeout": registry_entry["timeout_ms"],
-                "fallback": fallback_rule(svc.mandatory),
+                "fallback": fallback_rule(mandatory, registry_entry),
                 "backup_provider": registry_entry.get("backup_provider"),
+                "role": registry_entry.get("role", "primary"),
                 "vault_key": f"vault://{parsed.tenant_id}/{svc.id}/api_key",
             }
         )

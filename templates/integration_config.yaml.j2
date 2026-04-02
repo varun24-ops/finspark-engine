@@ -8,6 +8,7 @@ integrations:
     service_type: {{ svc.type }}
     adapter: {{ svc.adapter }}@{{ svc.version }}
     provider: {{ svc.provider }}
+    role: {{ svc.role }}
     backup_provider: {{ svc.backup_provider or "null" }}
     mandatory: {{ svc.mandatory | lower }}
     auth: {{ svc.vault_key }}
