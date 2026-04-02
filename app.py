@@ -155,6 +155,14 @@ def _inject_styles() -> None:
                 margin-bottom: 0.8rem;
                 font-size: 0.92rem;
             }
+            .section-title {
+                margin: 0.25rem 0 0.4rem;
+                font-size: 1.35rem;
+                line-height: 1.2;
+                letter-spacing: -0.02em;
+                color: #0f172a;
+                font-weight: 700;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -200,6 +208,13 @@ def _render_service_cards(services: list) -> None:
             """
         )
     st.markdown(f"<div class='service-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
+
+
+def _render_section_title(title: str) -> None:
+    st.markdown(
+        f"<h3 class='section-title'>{escape(title)}</h3>",
+        unsafe_allow_html=True,
+    )
 
 
 def _default_timeout(service_type: str) -> int:
@@ -345,7 +360,7 @@ if not st.session_state.tenant_id:
     st.info("Create or log into a tenant from the sidebar to run a scoped pipeline.")
     st.stop()
 
-st.subheader("Step 1 - Provide your BRD")
+_render_section_title("Step 1 - Provide your BRD")
 st.markdown(
     "<p class='section-note'>Paste a BRD or upload a PDF, DOCX, or text document. FinSpark will extract the text, detect providers, build config, simulate adapters, and log the run.</p>",
     unsafe_allow_html=True,
@@ -410,7 +425,7 @@ if run_btn:
     started_at = time.perf_counter()
 
     st.divider()
-    st.subheader("Step 2 - Parsed requirements")
+    _render_section_title("Step 2 - Parsed requirements")
     st.markdown(
         "<p class='section-note'>Detected services are summarized below before registry resolution and config generation.</p>",
         unsafe_allow_html=True,
@@ -441,7 +456,7 @@ if run_btn:
     missing_registry_services = _missing_registry_services(parsed)
     if missing_registry_services:
         st.divider()
-        st.subheader("Resolve Missing Registry Entries")
+        _render_section_title("Resolve Missing Registry Entries")
         st.warning(
             "Some providers from this BRD are not in the adapter registry yet. "
             "Add them below, then click Run pipeline again."
@@ -513,7 +528,7 @@ if run_btn:
         st.stop()
 
     st.divider()
-    st.subheader("Step 3 - Field mappings (reference CIBIL adapter)")
+    _render_section_title("Step 3 - Field mappings (reference CIBIL adapter)")
     st.markdown(
         "<p class='section-note'>Mappings stay demo-friendly offline and can switch to embeddings when explicitly enabled.</p>",
         unsafe_allow_html=True,
@@ -553,7 +568,7 @@ if run_btn:
             col4.warning("review")
 
     st.divider()
-    st.subheader("Step 4 - Generated config")
+    _render_section_title("Step 4 - Generated config")
     st.markdown(
         "<p class='section-note'>Configs are versioned per tenant and compared against the previous version in plain English.</p>",
         unsafe_allow_html=True,
@@ -572,7 +587,7 @@ if run_btn:
     )
 
     st.divider()
-    st.subheader("Step 5 - Sandbox simulation")
+    _render_section_title("Step 5 - Sandbox simulation")
     st.markdown(
         "<p class='section-note'>Simulation validates required fields, timeout behavior, and fallback outcomes for each adapter.</p>",
         unsafe_allow_html=True,
@@ -615,7 +630,7 @@ if run_btn:
 
     if healing_report and healing_report["attempt_count"]:
         st.divider()
-        st.subheader("Step 6 - Self-healing actions")
+        _render_section_title("Step 6 - Self-healing actions")
         st.markdown(
             "<p class='section-note'>FinSpark applies bounded fixes, explains each attempt, and reruns the simulation automatically.</p>",
             unsafe_allow_html=True,
@@ -628,7 +643,7 @@ if run_btn:
                     st.code(action, language=None)
                 st.caption(attempt["diff_summary"])
 
-        st.subheader("Healed config")
+        _render_section_title("Healed config")
         st.code(config_yaml, language="yaml")
 
     duration_ms = int((time.perf_counter() - started_at) * 1000)
@@ -644,7 +659,7 @@ if run_btn:
     )
 
     st.divider()
-    st.subheader("Step 7 - Audit trail")
+    _render_section_title("Step 7 - Audit trail")
     st.markdown(
         "<p class='section-note'>Every pipeline run is appended to the tenant audit log with timing and simulation details.</p>",
         unsafe_allow_html=True,
