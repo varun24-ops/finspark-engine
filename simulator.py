@@ -240,6 +240,59 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _normalize_backup_provider(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() in {"none", "null"}:
+        return None
+    return normalized
+
+
+def _policy_issues(
+    service_id: str,
+    service_cfg: dict[str, Any],
+    integrations: dict[str, Any],
+) -> tuple[list[str], bool]:
+    issues: list[str] = []
+    critical = False
+
+    service_type = str(service_cfg.get("service_type", "other"))
+    provider = str(service_cfg.get("provider", "Unknown"))
+    mandatory = bool(service_cfg.get("mandatory", False))
+    fallback = str(service_cfg.get("fallback", "")).strip()
+    backup_provider = _normalize_backup_provider(service_cfg.get("backup_provider"))
+
+    if mandatory and fallback != "fail_closed":
+        issues.append("Policy breach: mandatory integrations must use fail_closed fallback.")
+        critical = True
+
+    if service_type == "credit_bureau" and not mandatory:
+        issues.append("Policy breach: credit bureau checks must be mandatory before loan decisioning.")
+        critical = True
+
+    if service_type == "credit_bureau" and backup_provider and fallback != "fail_closed":
+        issues.append(
+            "Policy breach: credit bureau fallback must be fail_closed to enforce bureau checks."
+        )
+        critical = True
+
+    referenced_as_backup = any(
+        other_id != service_id
+        and str(other_cfg.get("service_type", "other")) == service_type
+        and _normalize_backup_provider(other_cfg.get("backup_provider")) == provider
+        for other_id, other_cfg in integrations.items()
+    )
+    if referenced_as_backup:
+        issues.append(
+            f"Policy breach: {provider} is configured as a standalone {service_type} "
+            "integration even though it is already modeled as another provider's fallback."
+        )
+        critical = True
+
+    return issues, critical
+
+
 def _generic_mock_for(service_type: str, adapter_name: str, provider: str) -> dict[str, Any]:
     template = GENERIC_SERVICE_MOCKS.get(service_type, GENERIC_SERVICE_MOCKS["other"])
     mock = {
@@ -263,8 +316,10 @@ def simulate_one(
     timeout_ms: int,
     mandatory: bool,
     should_fail: bool,
+    policy_issues: list[str] | None = None,
+    policy_breach: bool = False,
 ) -> dict[str, Any]:
-    issues = []
+    issues = list(policy_issues or [])
     adapter_library = MOCK_RESPONSES.get(adapter_name) or _generic_mock_for(
         service_type,
         adapter_name,
@@ -290,7 +345,7 @@ def simulate_one(
     if not issues:
         status = "pass"
     else:
-        status = "fail" if mandatory else "warn"
+        status = "fail" if mandatory or policy_breach else "warn"
 
     return {
         "service_id": service_id,
@@ -324,6 +379,7 @@ def run_simulation(
         mandatory = bool(service_cfg.get("mandatory", False))
         provider = str(service_cfg.get("provider", "Unknown"))
         service_type = str(service_cfg.get("service_type", "other"))
+        policy_issues, policy_breach = _policy_issues(service_id, service_cfg, integrations)
 
         result = simulate_one(
             service_id=service_id,
@@ -333,6 +389,8 @@ def run_simulation(
             timeout_ms=timeout_ms,
             mandatory=mandatory,
             should_fail=adapter_name in fail_adapters,
+            policy_issues=policy_issues,
+            policy_breach=policy_breach,
         )
         results.append(result)
 

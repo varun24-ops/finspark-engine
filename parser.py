@@ -7,6 +7,7 @@ import re
 from dotenv import load_dotenv
 from groq import Groq
 from pydantic import BaseModel
+from registry import get_adapter
 
 
 class ServiceRequirement(BaseModel):
@@ -53,6 +54,8 @@ no markdown, no code blocks:
 }
 
 If something is ambiguous, make your best judgment. Never return anything outside the JSON object.
+If a provider is only mentioned as a fallback, backup, or alternate provider for the same
+integration, do not emit it as a separate standalone service.
 """
 
 
@@ -101,8 +104,18 @@ PROVIDER_HINTS = {
     },
 }
 
-MANDATORY_KEYWORDS = ("mandatory", "must", "required", "needs", "required for")
+MANDATORY_KEYWORDS = ("mandatory", "must", "required", "requires", "needs", "required for")
 OPTIONAL_KEYWORDS = ("optional", "preferred", "nice to have", "can use", "may use")
+FALLBACK_KEYWORDS = (
+    "fallback",
+    "backup",
+    "secondary",
+    "alternate",
+    "alternative",
+    "if unavailable",
+    "if it fails",
+    "if this fails",
+)
 GENERIC_TYPE_HINTS = {
     "credit_bureau": ("credit bureau", "bureau", "credit check", "credit checks"),
     "kyc": ("ekyc", "e-kyc", "kyc", "aadhaar"),
@@ -142,6 +155,29 @@ def _sentence_is_mandatory(sentence: str) -> bool:
     return any(keyword in lower for keyword in MANDATORY_KEYWORDS)
 
 
+def _provider_is_fallback_in_sentence(
+    sentence: str,
+    provider: str,
+    primary_provider: str | None = None,
+) -> bool:
+    lower = sentence.lower()
+    provider_pattern = re.escape(provider.lower())
+    base_patterns = [
+        rf"{provider_pattern}\s+(?:as\s+)?(?:fallback|backup|secondary|alternate|alternative)",
+        rf"(?:fallback|backup|secondary|alternate|alternative)(?:\s+provider)?(?:\s+is|\s+to|:)?\s*{provider_pattern}",
+    ]
+    if primary_provider:
+        primary_pattern = re.escape(primary_provider.lower())
+        base_patterns.extend(
+            [
+                rf"if\s+{primary_pattern}.*?(?:fail|fails|unavailable).*?(?:use|switch to)\s+{provider_pattern}",
+                rf"(?:use|switch to)\s+{provider_pattern}.*?if\s+{primary_pattern}.*?(?:fail|fails|unavailable)",
+            ]
+        )
+
+    return any(re.search(pattern, lower) for pattern in base_patterns)
+
+
 def _infer_service_type(sentence: str) -> str | None:
     lower = sentence.lower()
     for service_type, keywords in GENERIC_TYPE_HINTS.items():
@@ -164,6 +200,50 @@ def _infer_provider_name(sentence: str) -> str | None:
             if candidate:
                 return candidate
     return None
+
+
+def _normalize_services(parsed: ParsedBRD, text: str) -> ParsedBRD:
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text)
+        if sentence.strip()
+    ]
+    services_by_provider = {service.provider.lower(): service for service in parsed.services}
+    removed_providers: set[str] = set()
+
+    for service in parsed.services:
+        registry_entry = get_adapter(service.provider)
+        if not registry_entry:
+            continue
+
+        backup_provider = registry_entry.get("backup_provider")
+        if not backup_provider:
+            continue
+
+        backup_service = services_by_provider.get(str(backup_provider).lower())
+        if backup_service is None or backup_service.type != service.type:
+            continue
+
+        is_fallback_provider = any(
+            _provider_is_fallback_in_sentence(sentence, backup_service.provider, service.provider)
+            for sentence in sentences
+            if backup_service.provider.lower() in sentence.lower()
+        )
+        if not is_fallback_provider:
+            continue
+
+        if service.type == "credit_bureau":
+            service.mandatory = True
+        else:
+            service.mandatory = service.mandatory or backup_service.mandatory
+        removed_providers.add(backup_service.provider.lower())
+
+    normalized_services = [
+        service
+        for service in parsed.services
+        if service.provider.lower() not in removed_providers
+    ]
+    return ParsedBRD(tenant_id=parsed.tenant_id, services=normalized_services)
 
 
 def _local_parse(text: str) -> ParsedBRD:
@@ -227,7 +307,7 @@ def _local_parse(text: str) -> ParsedBRD:
 
 def parse_brd(text: str) -> ParsedBRD:
     if client is None:
-        return _local_parse(text)
+        return _normalize_services(_local_parse(text), text)
 
     try:
         response = client.chat.completions.create(
@@ -245,9 +325,9 @@ def parse_brd(text: str) -> ParsedBRD:
         data = json.loads(json_str)
         if not data.get("tenant_id"):
             data["tenant_id"] = _infer_tenant_id(text)
-        return ParsedBRD(**data)
+        return _normalize_services(ParsedBRD(**data), text)
     except Exception:
-        return _local_parse(text)
+        return _normalize_services(_local_parse(text), text)
 
 
 if __name__ == "__main__":
