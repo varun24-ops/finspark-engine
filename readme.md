@@ -6,15 +6,17 @@ FinSpark turns BRDs and SOWs into tenant-scoped integration configs, validates t
 
 ## What is implemented
 
-- BRD parsing with Groq Llama 3.3, plus a local fallback parser when no API key is available
+- BRD parsing with Groq Llama 3.3, plus an evidence-driven local fallback parser with confidence scores, fallback detection, and parser notes
 - Semantic field mapping with sentence-transformers when enabled, plus a lexical fallback when embeddings are unavailable
-- Per-tenant YAML config generation with versioned history and plain-English diffs
+- Per-tenant YAML config generation with versioned history, adapter version catalogs, and plain-English diffs
 - SQLite-backed adapter registry with Streamlit admin controls
 - Inline missing-provider registry creation directly in the app flow
-- Sandbox simulation with mandatory vs optional behavior
-- Self-healing loop with deterministic fixes and optional Groq-assisted diagnosis
+- Policy engine that validates registry rules, mandatory controls, fallback chains, and approved adapter versions
+- Sandbox simulation with separate technical and policy validation signals
+- Self-healing loop with deterministic fixes, registry drift correction, and optional Groq-assisted diagnosis
 - Append-only tenant audit logs
 - Tenant registration/login with isolated config and audit folders
+- Typed error handling with graceful fallback when optional AI dependencies are unavailable
 - Docker and docker-compose deployment assets
 
 ## Repository layout
@@ -24,13 +26,16 @@ finspark-engine/
 |-- app.py
 |-- document_loader.py
 |-- parser.py
+|-- req_parser.py
 |-- mapper.py
 |-- config_gen.py
+|-- policy_engine.py
 |-- simulator.py
 |-- healer.py
 |-- audit.py
 |-- registry.py
 |-- diff.py
+|-- errors.py
 |-- tenants.py
 |-- templates/
 |   `-- integration_config.yaml.j2
@@ -48,22 +53,28 @@ See [docs/architecture.mmd](docs/architecture.mmd) for the Mermaid source.
 
 ```mermaid
 flowchart TD
-    A[BRD text or uploaded file] --> B[parser.py]
-    B --> C[mapper.py]
-    C --> D[config_gen.py]
-    D --> E[simulator.py]
-    E --> F{Failures found?}
-    F -- Yes --> G[healer.py]
-    G --> E
-    F -- No --> H[audit.py]
-    D --> I[diff.py]
-    J[registry.py SQLite] --> D
-    J --> G
-    K[tenants.py workspace isolation] --> D
+    A[BRD text or uploaded file] --> B[parser.py facade]
+    B --> C[req_parser.py]
+    C --> D[mapper.py]
+    C --> E[policy-aware parse evidence]
+    D --> F[config_gen.py]
+    J[registry.py SQLite + version catalog] --> F
+    F --> G[policy_engine.py]
+    G --> H[simulator.py]
+    H --> I{Failures found?}
+    I -- Yes --> K[healer.py]
     K --> H
-    L[app.py Streamlit UI] --> B
-    L --> J
-    L --> H
+    I -- No --> L[audit.py]
+    F --> M[diff.py]
+    N[tenants.py workspace isolation] --> F
+    N --> L
+    O[errors.py typed failures] --> C
+    O --> F
+    O --> H
+    O --> K
+    P[app.py Streamlit UI] --> B
+    P --> J
+    P --> L
 ```
 
 ## Quick start
@@ -114,7 +125,8 @@ The registry is stored in SQLite at `data/registry.db`.
 
 - Seed adapters are created automatically on first run
 - Admins can add, edit, or disable adapters from the Streamlit sidebar
-- Config generation and self-healing both read from the same registry source
+- Version catalogs can be entered as comma-separated values like `v3.1, v3.2, v3.3`
+- Config generation, policy validation, simulation, and self-healing all read from the same registry source
 
 ## Self-healing behavior
 
@@ -122,6 +134,7 @@ When a simulation fails, the engine can:
 
 - increase adapter timeouts
 - restore vault-backed auth references
+- realign configs with registry-approved adapter, role, fallback, and mandatory settings
 - switch to a configured backup provider
 - preserve stricter fallback behavior for mandatory services
 

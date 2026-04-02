@@ -8,25 +8,36 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from groq import Groq
 
 from diff import diff_configs, summarize_diff
+from errors import HealingError
 from registry import find_backup_adapter, get_adapter
 from simulator import run_simulation
 
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
+
 load_dotenv()
 _groq_api_key = os.getenv("GROQ_API_KEY")
-_groq_client = Groq(api_key=_groq_api_key) if _groq_api_key else None
+_groq_client = Groq(api_key=_groq_api_key) if _groq_api_key and Groq is not None else None
 
 
 def _load_config(path: str | Path) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
+    try:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise HealingError(f"Could not read config for healing: {path}") from exc
 
 
 def _write_config(path: str | Path, payload: dict[str, Any]) -> None:
-    with Path(path).open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(payload, handle, sort_keys=False)
+    try:
+        with Path(path).open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(payload, handle, sort_keys=False)
+    except OSError as exc:
+        raise HealingError(f"Could not write healed config: {path}") from exc
 
 
 def _find_service_id(config_payload: dict[str, Any], adapter_name: str) -> str | None:
@@ -40,6 +51,8 @@ def _find_service_id(config_payload: dict[str, Any], adapter_name: str) -> str |
 def _heuristic_diagnosis(result: dict[str, Any], actions: list[str]) -> str:
     if actions:
         return " ".join(actions)
+    if any("Policy breach" in issue for issue in result.get("issues", [])):
+        return "Detected config drift against registry policy, but there was no safe auto-correction."
     if any("Latency" in issue for issue in result.get("issues", [])):
         return "Observed a timeout breach and no safe timeout patch was available."
     if result.get("error_code"):
@@ -83,6 +96,48 @@ def _patch_service(
 ) -> list[str]:
     actions: list[str] = []
     issues = result.get("issues", [])
+    registry_entry = get_adapter(str(service_cfg.get("provider", "")))
+
+    if registry_entry:
+        expected_adapter = f"{registry_entry['adapter']}@{registry_entry['version']}"
+        expected_fallback = str(registry_entry.get("fallback_mode", "")).strip()
+        expected_role = str(registry_entry.get("role", "primary"))
+        expected_backup = registry_entry.get("backup_provider")
+        expected_mandatory = bool(registry_entry.get("mandatory_default", False))
+        expected_timeout = int(registry_entry.get("timeout_ms", service_cfg.get("timeout_ms", 1000)))
+
+        if expected_mandatory and not bool(service_cfg.get("mandatory", False)):
+            service_cfg["mandatory"] = True
+            actions.append(f"{service_id}: restored mandatory flag from registry policy.")
+
+        if expected_fallback and service_cfg.get("fallback") != expected_fallback:
+            service_cfg["fallback"] = expected_fallback
+            actions.append(
+                f"{service_id}: reset fallback mode to registry-approved value `{expected_fallback}`."
+            )
+
+        if service_cfg.get("role") != expected_role:
+            service_cfg["role"] = expected_role
+            actions.append(f"{service_id}: restored role `{expected_role}` from registry policy.")
+
+        if service_cfg.get("backup_provider") != expected_backup:
+            service_cfg["backup_provider"] = expected_backup
+            actions.append(
+                f"{service_id}: restored backup provider `{expected_backup or 'none'}` from registry."
+            )
+
+        if service_cfg.get("adapter") != expected_adapter:
+            service_cfg["adapter"] = expected_adapter
+            actions.append(
+                f"{service_id}: aligned adapter version to registry-approved `{expected_adapter}`."
+            )
+
+        if int(service_cfg.get("timeout_ms", 0)) < expected_timeout:
+            old_timeout = int(service_cfg.get("timeout_ms", 0))
+            service_cfg["timeout_ms"] = expected_timeout
+            actions.append(
+                f"{service_id}: raised timeout from {old_timeout}ms to registry minimum {expected_timeout}ms."
+            )
 
     if any("Latency" in issue for issue in issues):
         old_timeout = int(service_cfg.get("timeout_ms", 1000))
@@ -122,7 +177,12 @@ def _patch_service(
                 f"{backup_adapter['provider']}."
             )
 
-    if not result.get("mandatory", False) and service_cfg.get("fallback") != "skip":
+    registry_fallback = str(registry_entry.get("fallback_mode", "")).strip() if registry_entry else ""
+    if (
+        not result.get("mandatory", False)
+        and service_cfg.get("fallback") != "skip"
+        and registry_fallback in {"", "skip"}
+    ):
         service_cfg["fallback"] = "skip"
         actions.append(f"{service_id}: relaxed fallback mode to skip for an optional integration.")
 
@@ -140,7 +200,10 @@ def self_heal_config(
     fail_adapters = fail_adapters or set()
 
     attempts: list[dict[str, Any]] = []
-    results = run_simulation(config_payload, fail_adapters=fail_adapters)
+    try:
+        results = run_simulation(config_payload, fail_adapters=fail_adapters)
+    except Exception as exc:
+        raise HealingError("Initial simulation failed during self-healing.") from exc
 
     for attempt_number in range(1, max_retries + 1):
         failures = [result for result in results if result["status"] == "fail"]
@@ -168,7 +231,10 @@ def self_heal_config(
             break
 
         _write_config(config_path, config_payload)
-        results = run_simulation(config_payload, fail_adapters=fail_adapters)
+        try:
+            results = run_simulation(config_payload, fail_adapters=fail_adapters)
+        except Exception as exc:
+            raise HealingError("Simulation rerun failed during self-healing.") from exc
         diff_payload = diff_configs(before_patch, config_payload)
         attempts.append(
             {

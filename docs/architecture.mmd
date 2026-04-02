@@ -1,17 +1,23 @@
 flowchart TD
-    A[BRD or SOW text] --> B[parser.py]
-    B --> C[mapper.py]
-    C --> D[config_gen.py]
-    D --> E[simulator.py]
-    E --> F{Failures found?}
-    F -- Yes --> G[healer.py]
-    G --> E
-    F -- No --> H[audit.py]
-    D --> I[diff.py]
-    J[registry.py SQLite] --> D
-    J --> G
-    K[tenants.py workspace isolation] --> D
+    A[BRD or SOW text] --> B[parser.py facade]
+    B --> C[req_parser.py]
+    C --> D[mapper.py]
+    C --> E[parse evidence and fallback extraction]
+    D --> F[config_gen.py]
+    J[registry.py SQLite and version catalogs] --> F
+    F --> G[policy_engine.py]
+    G --> H[simulator.py]
+    H --> I{Failures found?}
+    I -- Yes --> K[healer.py]
     K --> H
-    L[app.py Streamlit UI] --> B
-    L --> J
-    L --> H
+    I -- No --> L[audit.py]
+    F --> M[diff.py]
+    N[tenants.py workspace isolation] --> F
+    N --> L
+    O[errors.py typed failure layer] --> C
+    O --> F
+    O --> H
+    O --> K
+    P[app.py Streamlit UI] --> B
+    P --> J
+    P --> L

@@ -87,7 +87,14 @@ def diff_configs(
                 f"{service_id}: adapter changed from {before.get('adapter')} to {after.get('adapter')}."
             )
 
-        for field_name in ("mandatory", "timeout_ms", "fallback"):
+        for field_name in (
+            "mandatory",
+            "timeout_ms",
+            "fallback",
+            "role",
+            "backup_provider",
+            "selected_version",
+        ):
             if before.get(field_name) != after.get(field_name):
                 field_changes.append(
                     f"{field_name} {before.get(field_name)} -> {after.get(field_name)}"

@@ -2,11 +2,22 @@ tenant_id: {{ tenant_id }}
 version: "{{ config_version }}"
 environment: sandbox
 generated_at: {{ generated_at }}
+metadata:
+  parser_mode: "{{ generation_metadata.parser_mode }}"
+  previous_config_version: {{ generation_metadata.previous_config_version or "null" }}
+  version_history_count: {{ generation_metadata.version_history_count }}
+  version_strategy: "{{ generation_metadata.version_strategy }}"
 integrations:
 {% for svc in services %}
   {{ svc.id }}:
     service_type: {{ svc.type }}
     adapter: {{ svc.adapter }}@{{ svc.version }}
+    selected_version: {{ svc.version }}
+    version_strategy: {{ svc.version_strategy }}
+    available_versions:
+{% for version in svc.available_versions %}
+      - {{ version }}
+{% endfor %}
     provider: {{ svc.provider }}
     role: {{ svc.role }}
     backup_provider: {{ svc.backup_provider or "null" }}

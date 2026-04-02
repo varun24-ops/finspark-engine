@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from errors import SimulationEngineError
+from policy_engine import PolicyEvaluation, evaluate_service_policy, normalize_backup_provider
 from registry import get_adapter
 
 
@@ -226,10 +229,18 @@ GENERIC_SERVICE_MOCKS = {
 
 def _load_config(config_source: str | Path | dict[str, Any]) -> dict[str, Any]:
     if isinstance(config_source, dict):
-        return config_source
+        payload = config_source
+    else:
+        path = Path(config_source)
+        if not path.exists():
+            raise SimulationEngineError(f"Config not found: {path}")
+        with path.open("r", encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle) or {}
 
-    with Path(config_source).open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
+    integrations = payload.get("integrations")
+    if not isinstance(integrations, dict):
+        raise SimulationEngineError("Config must contain an `integrations` mapping.")
+    return payload
 
 
 def summarize_results(results: list[dict[str, Any]]) -> dict[str, int]:
@@ -239,91 +250,6 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, int]:
         "failed": sum(1 for result in results if result["status"] == "fail"),
         "warnings": sum(1 for result in results if result["status"] == "warn"),
     }
-
-
-def _normalize_backup_provider(value: Any) -> str | None:
-    if value is None:
-        return None
-    normalized = str(value).strip()
-    if not normalized or normalized.lower() in {"none", "null"}:
-        return None
-    return normalized
-
-
-def _policy_issues(
-    service_id: str,
-    service_cfg: dict[str, Any],
-    integrations: dict[str, Any],
-) -> tuple[list[str], bool]:
-    issues: list[str] = []
-    critical = False
-
-    service_type = str(service_cfg.get("service_type", "other"))
-    provider = str(service_cfg.get("provider", "Unknown"))
-    mandatory = bool(service_cfg.get("mandatory", False))
-    fallback = str(service_cfg.get("fallback", "")).strip()
-    backup_provider = _normalize_backup_provider(service_cfg.get("backup_provider"))
-    registry_entry = get_adapter(provider)
-
-    if registry_entry is None:
-        issues.append(f"Policy breach: provider {provider} is not present in the adapter registry.")
-        return issues, True
-
-    expected_mandatory = bool(registry_entry.get("mandatory_default", False))
-    expected_fallback = str(registry_entry.get("fallback_mode", "")).strip()
-    expected_role = str(registry_entry.get("role", "primary")).strip()
-    expected_backup_provider = _normalize_backup_provider(registry_entry.get("backup_provider"))
-
-    if expected_mandatory and not mandatory:
-        issues.append(
-            f"Policy breach: registry marks {provider} as mandatory and runtime config cannot downgrade it."
-        )
-        critical = True
-
-    if expected_fallback and fallback != expected_fallback:
-        issues.append(
-            f"Policy breach: registry requires fallback mode `{expected_fallback}` for {provider}, "
-            f"but config uses `{fallback or 'none'}`."
-        )
-        critical = True
-
-    if expected_backup_provider != backup_provider:
-        issues.append(
-            f"Policy breach: registry expects backup provider `{expected_backup_provider or 'none'}` "
-            f"for {provider}, but config uses `{backup_provider or 'none'}`."
-        )
-        critical = True
-
-    if fallback == "use_backup" and not backup_provider:
-        issues.append("Policy breach: use_backup fallback requires a configured backup provider.")
-        critical = True
-
-    if service_type == "kyc" and not mandatory:
-        issues.append("Policy breach: KYC must remain mandatory.")
-        critical = True
-
-    if service_type == "bank_verify" and not mandatory:
-        issues.append("Policy breach: bank verification must remain mandatory.")
-        critical = True
-
-    referenced_as_backup = any(
-        other_id != service_id
-        and str(other_cfg.get("service_type", "other")) == service_type
-        and _normalize_backup_provider(other_cfg.get("backup_provider")) == provider
-        for other_id, other_cfg in integrations.items()
-    )
-    if expected_role == "fallback" and not referenced_as_backup:
-        issues.append(
-            f"Policy breach: {provider} is configured as a standalone {service_type} "
-            "integration even though it is already modeled as another provider's fallback."
-        )
-        critical = True
-
-    if service_type == "credit_bureau" and not mandatory:
-        issues.append("Policy breach: credit bureau checks must be mandatory before loan decisioning.")
-        critical = True
-
-    return issues, critical
 
 
 def _generic_mock_for(service_type: str, adapter_name: str, provider: str) -> dict[str, Any]:
@@ -349,10 +275,12 @@ def simulate_one(
     timeout_ms: int,
     mandatory: bool,
     should_fail: bool,
-    policy_issues: list[str] | None = None,
-    policy_breach: bool = False,
+    policy_evaluation: PolicyEvaluation | None = None,
 ) -> dict[str, Any]:
-    issues = list(policy_issues or [])
+    policy_issues = list(policy_evaluation.issues if policy_evaluation else [])
+    policy_advisories = list(policy_evaluation.advisories if policy_evaluation else [])
+    technical_issues: list[str] = []
+
     adapter_library = MOCK_RESPONSES.get(adapter_name) or _generic_mock_for(
         service_type,
         adapter_name,
@@ -366,19 +294,32 @@ def simulate_one(
 
     if response.get("status") != "SUCCESS":
         message = response.get("message") or response.get("errorCode") or "Unknown provider error"
-        issues.append(f"Provider returned failure payload: {message}")
+        technical_issues.append(f"Provider returned failure payload: {message}")
 
     for field_name in adapter_library.get("required_fields", []):
         if field_name not in response:
-            issues.append(f"Missing required field: {field_name}")
+            technical_issues.append(f"Missing required field: {field_name}")
 
     if latency_ms > timeout_ms:
-        issues.append(f"Latency {latency_ms}ms exceeded timeout {timeout_ms}ms")
+        technical_issues.append(f"Latency {latency_ms}ms exceeded timeout {timeout_ms}ms")
 
-    if not issues:
-        status = "pass"
+    policy_status = "fail" if policy_issues else "warn" if policy_advisories else "pass"
+    technical_status = (
+        "fail"
+        if technical_issues and mandatory
+        else "warn"
+        if technical_issues
+        else "pass"
+    )
+
+    if policy_issues or (technical_issues and mandatory):
+        status = "fail"
+    elif technical_issues or policy_advisories:
+        status = "warn"
     else:
-        status = "fail" if mandatory or policy_breach else "warn"
+        status = "pass"
+
+    issues = list(policy_issues) + list(technical_issues) + list(policy_advisories)
 
     return {
         "service_id": service_id,
@@ -388,6 +329,12 @@ def simulate_one(
         "status": status,
         "latency_ms": latency_ms,
         "issues": issues,
+        "technical_issues": technical_issues,
+        "policy_issues": policy_issues,
+        "policy_advisories": policy_advisories,
+        "technical_status": technical_status,
+        "policy_status": policy_status,
+        "validation_mode": "technical+policy",
         "response": response,
         "error_code": response.get("errorCode"),
         "mandatory": mandatory,
@@ -395,28 +342,29 @@ def simulate_one(
 
 
 def _should_attempt_backup(
-    result: dict[str, Any],
+    technical_issues: list[str],
     fallback_mode: str,
     backup_provider: str | None,
     policy_breach: bool,
 ) -> bool:
     if policy_breach or fallback_mode != "use_backup" or not backup_provider:
         return False
-    return bool(result["issues"])
+    return bool(technical_issues)
 
 
 def run_simulation(
     config_source: str | Path | dict[str, Any],
     fail_adapters: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    if fail_adapters is None:
-        fail_adapters = set()
-
+    fail_adapters = fail_adapters or set()
     config = _load_config(config_source)
     integrations = config.get("integrations", {})
     results = []
 
     for service_id, service_cfg in integrations.items():
+        if not isinstance(service_cfg, dict):
+            raise SimulationEngineError(f"Integration `{service_id}` must be a mapping.")
+
         adapter_value = str(service_cfg.get("adapter", ""))
         adapter_name = adapter_value.split("@", 1)[0]
         timeout_ms = int(service_cfg.get("timeout_ms", 500))
@@ -424,8 +372,8 @@ def run_simulation(
         provider = str(service_cfg.get("provider", "Unknown"))
         service_type = str(service_cfg.get("service_type", "other"))
         fallback_mode = str(service_cfg.get("fallback", "")).strip()
-        backup_provider = _normalize_backup_provider(service_cfg.get("backup_provider"))
-        policy_issues, policy_breach = _policy_issues(service_id, service_cfg, integrations)
+        backup_provider = normalize_backup_provider(service_cfg.get("backup_provider"))
+        policy_evaluation = evaluate_service_policy(service_id, service_cfg, integrations)
 
         result = simulate_one(
             service_id=service_id,
@@ -435,16 +383,21 @@ def run_simulation(
             timeout_ms=timeout_ms,
             mandatory=mandatory,
             should_fail=adapter_name in fail_adapters,
-            policy_issues=policy_issues,
-            policy_breach=policy_breach,
+            policy_evaluation=policy_evaluation,
         )
 
-        if _should_attempt_backup(result, fallback_mode, backup_provider, policy_breach):
+        if _should_attempt_backup(
+            result["technical_issues"],
+            fallback_mode,
+            backup_provider,
+            policy_evaluation.critical,
+        ):
             backup_entry = get_adapter(str(backup_provider))
             if backup_entry is None:
-                result["issues"].append(
-                    f"Fallback provider {backup_provider} is not available in the registry."
-                )
+                message = f"Fallback provider {backup_provider} is not available in the registry."
+                result["technical_issues"].append(message)
+                result["issues"].append(message)
+                result["technical_status"] = "fail" if mandatory else "warn"
                 result["status"] = "fail" if mandatory else "warn"
             else:
                 backup_result = simulate_one(
@@ -463,23 +416,42 @@ def run_simulation(
                 result["latency_ms"] += backup_result["latency_ms"]
 
                 if backup_result["status"] == "pass":
-                    result["status"] = "pass"
+                    result["status"] = (
+                        "fail"
+                        if result["policy_status"] == "fail"
+                        else "warn"
+                        if result["policy_status"] == "warn"
+                        else "pass"
+                    )
+                    result["technical_status"] = "pass"
                     result["response"] = backup_result["response"]
                     result["error_code"] = None
-                    result["issues"] = [
+                    fallback_message = (
                         f"Primary adapter {adapter_name} failed; fallback to "
                         f"{backup_entry['adapter']} succeeded."
-                    ]
+                    )
+                    result["technical_issues"] = [fallback_message]
+                    result["issues"] = (
+                        list(result["policy_issues"])
+                        + [fallback_message]
+                        + list(result["policy_advisories"])
+                    )
                 else:
-                    result["issues"].append(
+                    result["technical_issues"].append(
                         f"Fallback provider {backup_entry['provider']} also failed."
                     )
-                    result["issues"].extend(
+                    result["technical_issues"].extend(
                         f"Fallback issue: {issue}" for issue in backup_result["issues"]
+                    )
+                    result["issues"] = (
+                        list(result["policy_issues"])
+                        + list(result["technical_issues"])
+                        + list(result["policy_advisories"])
                     )
                     result["error_code"] = backup_result.get("error_code") or result.get(
                         "error_code"
                     )
+                    result["technical_status"] = "fail" if mandatory else "warn"
                     result["status"] = "fail" if mandatory else "warn"
 
         results.append(result)
