@@ -56,11 +56,62 @@ def _inject_styles() -> None:
     st.markdown(
         """
         <style>
+            :root {
+                --finspark-text: #0f172a;
+                --finspark-muted: #334155;
+                --finspark-surface: rgba(255, 255, 255, 0.78);
+                --finspark-border: rgba(148, 163, 184, 0.22);
+            }
             .stApp {
                 background:
                     radial-gradient(circle at top left, rgba(11, 133, 255, 0.10), transparent 32%),
                     radial-gradient(circle at top right, rgba(25, 181, 123, 0.10), transparent 30%),
                     linear-gradient(180deg, #f4f7fb 0%, #eef3f8 100%);
+            }
+            [data-testid="stAppViewContainer"] > .main {
+                color: var(--finspark-text);
+            }
+            [data-testid="stAppViewContainer"] .block-container {
+                background: var(--finspark-surface);
+                border: 1px solid var(--finspark-border);
+                border-radius: 28px;
+                box-shadow: 0 20px 44px rgba(15, 23, 42, 0.08);
+                padding: 1.3rem 1.5rem 2rem;
+                margin-top: 0.8rem;
+                margin-bottom: 1.5rem;
+                backdrop-filter: blur(8px);
+            }
+            [data-testid="stAppViewContainer"] p,
+            [data-testid="stAppViewContainer"] label,
+            [data-testid="stAppViewContainer"] li,
+            [data-testid="stAppViewContainer"] small,
+            [data-testid="stAppViewContainer"] .stMarkdown,
+            [data-testid="stAppViewContainer"] .stCaption,
+            [data-testid="stAppViewContainer"] [data-testid="stMetricLabel"],
+            [data-testid="stAppViewContainer"] [data-testid="stMetricValue"] {
+                color: var(--finspark-text);
+            }
+            [data-testid="stAppViewContainer"] textarea,
+            [data-testid="stAppViewContainer"] input {
+                color: var(--finspark-text) !important;
+            }
+            [data-testid="stAppViewContainer"] [data-baseweb="select"] *,
+            [data-testid="stAppViewContainer"] [data-baseweb="radio"] *,
+            [data-testid="stAppViewContainer"] [data-baseweb="popover"] * {
+                color: var(--finspark-text);
+            }
+            [data-testid="stAppViewContainer"] .stRadio label,
+            [data-testid="stAppViewContainer"] .stFileUploader label,
+            [data-testid="stAppViewContainer"] .stTextArea label,
+            [data-testid="stAppViewContainer"] .stTextInput label,
+            [data-testid="stAppViewContainer"] .stSelectbox label,
+            [data-testid="stAppViewContainer"] .stMultiSelect label {
+                color: var(--finspark-text) !important;
+                font-weight: 600;
+            }
+            [data-testid="stAppViewContainer"] .stCaption,
+            [data-testid="stAppViewContainer"] .section-note {
+                color: var(--finspark-muted) !important;
             }
             [data-testid="stSidebar"] {
                 background: linear-gradient(180deg, #0f172a 0%, #162033 100%);
@@ -85,12 +136,18 @@ def _inject_styles() -> None:
                 font-size: 2.1rem;
                 line-height: 1.1;
                 letter-spacing: -0.03em;
+                color: #f8fbff !important;
             }
             .hero-shell p {
                 margin: 0.7rem 0 0;
                 color: rgba(248, 251, 255, 0.82);
                 font-size: 1rem;
                 max-width: 54rem;
+            }
+            .hero-shell,
+            .hero-shell p,
+            .hero-shell span {
+                color: #f8fbff !important;
             }
             .hero-pills {
                 display: flex;
