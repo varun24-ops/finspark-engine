@@ -103,13 +103,13 @@ docker-compose up --build
 Open `http://localhost:8501`.
 
 ## Demo flow
-
-1. Create or log into a tenant from the sidebar.
-2. Paste a BRD or upload a PDF, DOCX, TXT, MD, or BRD text file with providers like CIBIL, UIDAI, NIC, GSTN, Razorpay, or PayU.
-3. Run the pipeline to parse services, map fields, generate a config, simulate adapters, and auto-heal failures.
-4. If a provider is missing from the registry, add it inline in the app and rerun.
-5. Inspect the generated diff summary and download the final YAML.
-6. Review the tenant audit trail for previous runs.
+1. Change the Mode to Light Mode for better visibility
+2. Create or log into a tenant from the sidebar.
+3. Paste a BRD or upload a PDF, DOCX, TXT, MD, or BRD text file with providers like CIBIL, UIDAI, NIC, GSTN, Razorpay, or PayU.
+4. Run the pipeline to parse services, map fields, generate a config, simulate adapters, and auto-heal failures.
+5. If a provider is missing from the registry, add it inline in the app and rerun.
+6. Inspect the generated diff summary and download the final YAML.
+7. Review the tenant audit trail for previous runs.
 
 ## Tenant isolation
 
