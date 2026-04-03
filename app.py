@@ -57,16 +57,19 @@ def _inject_styles() -> None:
         """
         <style>
             :root {
-                --finspark-text: #0f172a;
-                --finspark-muted: #334155;
-                --finspark-surface: rgba(255, 255, 255, 0.78);
-                --finspark-border: rgba(148, 163, 184, 0.22);
+                --finspark-text: #ffe4e6;
+                --finspark-muted: #fecdd3;
+                --finspark-accent: #fb7185;
+                --finspark-accent-strong: #f43f5e;
+                --finspark-surface: rgba(16, 10, 18, 0.88);
+                --finspark-surface-strong: rgba(28, 12, 18, 0.96);
+                --finspark-border: rgba(251, 113, 133, 0.22);
             }
             .stApp {
                 background:
-                    radial-gradient(circle at top left, rgba(11, 133, 255, 0.10), transparent 32%),
-                    radial-gradient(circle at top right, rgba(25, 181, 123, 0.10), transparent 30%),
-                    linear-gradient(180deg, #f4f7fb 0%, #eef3f8 100%);
+                    radial-gradient(circle at top left, rgba(244, 63, 94, 0.18), transparent 32%),
+                    radial-gradient(circle at top right, rgba(251, 113, 133, 0.16), transparent 30%),
+                    linear-gradient(180deg, #12070d 0%, #1f0a12 48%, #3b0913 100%);
             }
             [data-testid="stAppViewContainer"] > .main {
                 color: var(--finspark-text);
@@ -75,7 +78,7 @@ def _inject_styles() -> None:
                 background: var(--finspark-surface);
                 border: 1px solid var(--finspark-border);
                 border-radius: 28px;
-                box-shadow: 0 20px 44px rgba(15, 23, 42, 0.08);
+                box-shadow: 0 22px 48px rgba(2, 6, 23, 0.35);
                 padding: 1.3rem 1.5rem 2rem;
                 margin-top: 0.8rem;
                 margin-bottom: 1.5rem;
@@ -88,17 +91,34 @@ def _inject_styles() -> None:
             [data-testid="stAppViewContainer"] .stMarkdown,
             [data-testid="stAppViewContainer"] .stCaption,
             [data-testid="stAppViewContainer"] [data-testid="stMetricLabel"],
-            [data-testid="stAppViewContainer"] [data-testid="stMetricValue"] {
+            [data-testid="stAppViewContainer"] [data-testid="stMetricValue"],
+            [data-testid="stAppViewContainer"] h1,
+            [data-testid="stAppViewContainer"] h2,
+            [data-testid="stAppViewContainer"] h3,
+            [data-testid="stAppViewContainer"] h4,
+            [data-testid="stAppViewContainer"] h5,
+            [data-testid="stAppViewContainer"] h6,
+            [data-testid="stAppViewContainer"] span {
                 color: var(--finspark-text);
             }
             [data-testid="stAppViewContainer"] textarea,
             [data-testid="stAppViewContainer"] input {
                 color: var(--finspark-text) !important;
+                background: var(--finspark-surface-strong) !important;
+                caret-color: var(--finspark-accent);
             }
             [data-testid="stAppViewContainer"] [data-baseweb="select"] *,
             [data-testid="stAppViewContainer"] [data-baseweb="radio"] *,
             [data-testid="stAppViewContainer"] [data-baseweb="popover"] * {
                 color: var(--finspark-text);
+            }
+            [data-testid="stAppViewContainer"] [data-baseweb="input"] {
+                background: var(--finspark-surface-strong) !important;
+            }
+            [data-testid="stAppViewContainer"] [data-baseweb="select"] > div,
+            [data-testid="stAppViewContainer"] [data-baseweb="textarea"] > div {
+                background: var(--finspark-surface-strong) !important;
+                border-color: rgba(251, 113, 133, 0.18) !important;
             }
             [data-testid="stAppViewContainer"] .stRadio label,
             [data-testid="stAppViewContainer"] .stFileUploader label,
@@ -106,12 +126,16 @@ def _inject_styles() -> None:
             [data-testid="stAppViewContainer"] .stTextInput label,
             [data-testid="stAppViewContainer"] .stSelectbox label,
             [data-testid="stAppViewContainer"] .stMultiSelect label {
-                color: var(--finspark-text) !important;
+                color: var(--finspark-accent) !important;
                 font-weight: 600;
             }
             [data-testid="stAppViewContainer"] .stCaption,
             [data-testid="stAppViewContainer"] .section-note {
                 color: var(--finspark-muted) !important;
+            }
+            [data-testid="stAppViewContainer"] code,
+            [data-testid="stAppViewContainer"] pre {
+                color: #ffd5dc !important;
             }
             [data-testid="stSidebar"] {
                 background: linear-gradient(180deg, #0f172a 0%, #162033 100%);
@@ -170,19 +194,19 @@ def _inject_styles() -> None:
                 margin: 0.75rem 0 0.25rem;
             }
             .service-card {
-                background: rgba(255, 255, 255, 0.88);
-                border: 1px solid rgba(15, 23, 42, 0.08);
+                background: rgba(35, 12, 18, 0.78);
+                border: 1px solid rgba(251, 113, 133, 0.14);
                 border-radius: 20px;
                 padding: 1rem;
-                box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+                box-shadow: 0 16px 36px rgba(2, 6, 23, 0.22);
             }
             .service-card h4 {
                 margin: 0 0 0.35rem;
                 font-size: 1rem;
-                color: #0f172a;
+                color: var(--finspark-text);
             }
             .service-meta {
-                color: #3b4b64;
+                color: var(--finspark-muted);
                 font-size: 0.88rem;
                 margin-bottom: 0.6rem;
             }
@@ -196,19 +220,19 @@ def _inject_styles() -> None:
                 font-weight: 600;
             }
             .service-badge.type {
-                background: #dbeafe;
-                color: #1d4ed8;
+                background: rgba(251, 113, 133, 0.18);
+                color: #ffe4e6;
             }
             .service-badge.mandatory {
-                background: #fee2e2;
-                color: #b91c1c;
+                background: rgba(244, 63, 94, 0.26);
+                color: #fff1f2;
             }
             .service-badge.optional {
-                background: #e2e8f0;
-                color: #334155;
+                background: rgba(190, 24, 93, 0.16);
+                color: #fecdd3;
             }
             .section-note {
-                color: #475569;
+                color: var(--finspark-muted);
                 margin-top: -0.35rem;
                 margin-bottom: 0.8rem;
                 font-size: 0.92rem;
@@ -218,7 +242,7 @@ def _inject_styles() -> None:
                 font-size: 1.35rem;
                 line-height: 1.2;
                 letter-spacing: -0.02em;
-                color: #0f172a;
+                color: var(--finspark-accent);
                 font-weight: 700;
             }
         </style>
