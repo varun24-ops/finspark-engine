@@ -57,13 +57,13 @@ def _inject_styles() -> None:
         """
         <style>
             :root {
-                --finspark-text: #ffe4e6;
-                --finspark-muted: #fecdd3;
-                --finspark-accent: #fb7185;
-                --finspark-accent-strong: #f43f5e;
-                --finspark-surface: rgba(16, 10, 18, 0.88);
-                --finspark-surface-strong: rgba(28, 12, 18, 0.96);
-                --finspark-border: rgba(251, 113, 133, 0.22);
+                --finspark-text: #ffffff;
+                --finspark-muted: #e2e8f0;
+                --finspark-accent: #ff8fa3;
+                --finspark-accent-strong: #ff4d6d;
+                --finspark-surface: rgba(16, 10, 18, 0.92);
+                --finspark-surface-strong: rgba(28, 12, 18, 0.98);
+                --finspark-border: rgba(251, 113, 133, 0.28);
             }
             .stApp {
                 background:
@@ -84,6 +84,8 @@ def _inject_styles() -> None:
                 margin-bottom: 1.5rem;
                 backdrop-filter: blur(8px);
             }
+
+            /* ── Core text: force pure white everywhere ── */
             [data-testid="stAppViewContainer"] p,
             [data-testid="stAppViewContainer"] label,
             [data-testid="stAppViewContainer"] li,
@@ -98,19 +100,38 @@ def _inject_styles() -> None:
             [data-testid="stAppViewContainer"] h4,
             [data-testid="stAppViewContainer"] h5,
             [data-testid="stAppViewContainer"] h6,
-            [data-testid="stAppViewContainer"] span {
+            [data-testid="stAppViewContainer"] span,
+            [data-testid="stAppViewContainer"] div {
                 color: var(--finspark-text);
             }
+
+            /* ── Captions and muted text: light slate, still very readable ── */
+            [data-testid="stAppViewContainer"] .stCaption,
+            [data-testid="stAppViewContainer"] .section-note,
+            [data-testid="stAppViewContainer"] [data-testid="stCaptionContainer"] {
+                color: var(--finspark-muted) !important;
+            }
+
+            /* ── Metric values: bright white, larger weight ── */
+            [data-testid="stAppViewContainer"] [data-testid="stMetricValue"] {
+                color: #ffffff !important;
+                font-weight: 700;
+            }
+            [data-testid="stAppViewContainer"] [data-testid="stMetricLabel"] {
+                color: var(--finspark-muted) !important;
+            }
+
+            /* ── Inputs ── */
             [data-testid="stAppViewContainer"] textarea,
             [data-testid="stAppViewContainer"] input {
-                color: var(--finspark-text) !important;
+                color: #ffffff !important;
                 background: var(--finspark-surface-strong) !important;
                 caret-color: var(--finspark-accent);
             }
             [data-testid="stAppViewContainer"] [data-baseweb="select"] *,
             [data-testid="stAppViewContainer"] [data-baseweb="radio"] *,
             [data-testid="stAppViewContainer"] [data-baseweb="popover"] * {
-                color: var(--finspark-text);
+                color: #ffffff !important;
             }
             [data-testid="stAppViewContainer"] [data-baseweb="input"] {
                 background: var(--finspark-surface-strong) !important;
@@ -118,35 +139,75 @@ def _inject_styles() -> None:
             [data-testid="stAppViewContainer"] [data-baseweb="select"] > div,
             [data-testid="stAppViewContainer"] [data-baseweb="textarea"] > div {
                 background: var(--finspark-surface-strong) !important;
-                border-color: rgba(251, 113, 133, 0.18) !important;
+                border-color: rgba(251, 113, 133, 0.28) !important;
             }
+
+            /* ── Form labels: bright accent, clearly readable ── */
             [data-testid="stAppViewContainer"] .stRadio label,
             [data-testid="stAppViewContainer"] .stFileUploader label,
             [data-testid="stAppViewContainer"] .stTextArea label,
             [data-testid="stAppViewContainer"] .stTextInput label,
             [data-testid="stAppViewContainer"] .stSelectbox label,
-            [data-testid="stAppViewContainer"] .stMultiSelect label {
+            [data-testid="stAppViewContainer"] .stMultiSelect label,
+            [data-testid="stAppViewContainer"] .stNumberInput label {
                 color: var(--finspark-accent) !important;
                 font-weight: 600;
             }
-            [data-testid="stAppViewContainer"] .stCaption,
-            [data-testid="stAppViewContainer"] .section-note {
-                color: var(--finspark-muted) !important;
-            }
+
+            /* ── Code blocks: bright near-white ── */
             [data-testid="stAppViewContainer"] code,
-            [data-testid="stAppViewContainer"] pre {
-                color: #ffd5dc !important;
+            [data-testid="stAppViewContainer"] pre,
+            [data-testid="stAppViewContainer"] pre * {
+                color: #f8fafc !important;
+                background: rgba(0, 0, 0, 0.35) !important;
             }
+
+            /* ── Sidebar ── */
             [data-testid="stSidebar"] {
                 background: linear-gradient(180deg, #0f172a 0%, #162033 100%);
             }
-            [data-testid="stSidebar"] * {
-                color: #e5eefb;
+            [data-testid="stSidebar"] *,
+            [data-testid="stSidebar"] p,
+            [data-testid="stSidebar"] label,
+            [data-testid="stSidebar"] span,
+            [data-testid="stSidebar"] div,
+            [data-testid="stSidebar"] .stMarkdown p {
+                color: #f1f5f9 !important;
             }
-            [data-testid="stSidebar"] .stMarkdown p,
+            [data-testid="stSidebar"] .stCaption,
+            [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+                color: #cbd5e1 !important;
+            }
             [data-testid="stSidebar"] label {
-                color: #d9e5f7;
+                color: #93c5fd !important;
+                font-weight: 600;
             }
+            [data-testid="stSidebar"] input,
+            [data-testid="stSidebar"] textarea {
+                color: #f1f5f9 !important;
+                background: rgba(15, 23, 42, 0.85) !important;
+            }
+            [data-testid="stSidebar"] [data-baseweb="select"] * {
+                color: #f1f5f9 !important;
+            }
+            [data-testid="stSidebar"] [data-baseweb="select"] > div {
+                background: rgba(15, 23, 42, 0.85) !important;
+            }
+
+            /* ── Alert / info / success / error boxes ── */
+            [data-testid="stAppViewContainer"] .stAlert p,
+            [data-testid="stAppViewContainer"] .stAlert div,
+            [data-testid="stAppViewContainer"] .stAlert span {
+                color: #0f172a !important;
+            }
+
+            /* ── Dataframe ── */
+            [data-testid="stAppViewContainer"] .stDataFrame,
+            [data-testid="stAppViewContainer"] .stDataFrame * {
+                color: #f1f5f9 !important;
+            }
+
+            /* ── Hero section ── */
             .hero-shell {
                 padding: 1.4rem 1.6rem;
                 border-radius: 24px;
@@ -160,18 +221,13 @@ def _inject_styles() -> None:
                 font-size: 2.1rem;
                 line-height: 1.1;
                 letter-spacing: -0.03em;
-                color: #f8fbff !important;
+                color: #ffffff !important;
             }
-            .hero-shell p {
-                margin: 0.7rem 0 0;
-                color: rgba(248, 251, 255, 0.82);
-                font-size: 1rem;
-                max-width: 54rem;
-            }
-            .hero-shell,
             .hero-shell p,
             .hero-shell span {
-                color: #f8fbff !important;
+                color: rgba(248, 251, 255, 0.92) !important;
+                font-size: 1rem;
+                max-width: 54rem;
             }
             .hero-pills {
                 display: flex;
@@ -181,12 +237,15 @@ def _inject_styles() -> None:
             }
             .hero-pill {
                 padding: 0.38rem 0.72rem;
-                border: 1px solid rgba(255, 255, 255, 0.14);
+                border: 1px solid rgba(255, 255, 255, 0.22);
                 border-radius: 999px;
-                background: rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.14);
                 font-size: 0.82rem;
-                color: #f8fbff;
+                color: #ffffff !important;
+                font-weight: 500;
             }
+
+            /* ── Service cards ── */
             .service-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -194,8 +253,8 @@ def _inject_styles() -> None:
                 margin: 0.75rem 0 0.25rem;
             }
             .service-card {
-                background: rgba(35, 12, 18, 0.78);
-                border: 1px solid rgba(251, 113, 133, 0.14);
+                background: rgba(15, 5, 10, 0.82);
+                border: 1px solid rgba(251, 113, 133, 0.22);
                 border-radius: 20px;
                 padding: 1rem;
                 box-shadow: 0 16px 36px rgba(2, 6, 23, 0.22);
@@ -203,10 +262,11 @@ def _inject_styles() -> None:
             .service-card h4 {
                 margin: 0 0 0.35rem;
                 font-size: 1rem;
-                color: var(--finspark-text);
+                color: #ffffff !important;
+                font-weight: 700;
             }
             .service-meta {
-                color: var(--finspark-muted);
+                color: #cbd5e1 !important;
                 font-size: 0.88rem;
                 margin-bottom: 0.6rem;
             }
@@ -220,19 +280,21 @@ def _inject_styles() -> None:
                 font-weight: 600;
             }
             .service-badge.type {
-                background: rgba(251, 113, 133, 0.18);
-                color: #ffe4e6;
+                background: rgba(251, 113, 133, 0.22);
+                color: #ffffff !important;
             }
             .service-badge.mandatory {
-                background: rgba(244, 63, 94, 0.26);
-                color: #fff1f2;
+                background: rgba(244, 63, 94, 0.32);
+                color: #ffffff !important;
             }
             .service-badge.optional {
-                background: rgba(190, 24, 93, 0.16);
-                color: #fecdd3;
+                background: rgba(190, 24, 93, 0.22);
+                color: #f1f5f9 !important;
             }
+
+            /* ── Section helpers ── */
             .section-note {
-                color: var(--finspark-muted);
+                color: var(--finspark-muted) !important;
                 margin-top: -0.35rem;
                 margin-bottom: 0.8rem;
                 font-size: 0.92rem;
@@ -242,7 +304,7 @@ def _inject_styles() -> None:
                 font-size: 1.35rem;
                 line-height: 1.2;
                 letter-spacing: -0.02em;
-                color: var(--finspark-accent);
+                color: var(--finspark-accent) !important;
                 font-weight: 700;
             }
         </style>
